@@ -1,12 +1,17 @@
-#!/bin/sh
+#!/bin/bash
 # vim:sw=4:ts=4:et
 
 set -e
+set -o pipefail -o nounset
+
+: "${VSCODE_KEYRING_PASS:?Variable not set or empty}"
 
 ARGS="$@"
 
+echo $ARGS
+
 if [ -z "$ARGS" ]; then
-	ARGS=serve-local
+	ARGS="serve-local --accept-server-license-terms --without-connection-token --host 0.0.0.0"
 fi
 
 entrypoint_log() {
@@ -48,6 +53,6 @@ else
 	entrypoint_log "$0: No files found in /docker-entrypoint.d/, skipping configuration"
 fi
 
-/usr/sbin/nginx -c /etc/nginx/nginx.conf -g "daemon on; master_process on;"
+#exec dbus-run-session -- code-server --accept-server-license-terms ${ARGS} --host 0.0.0.0
 
-exec code-server --accept-server-license-terms ${ARGS}
+exec dbus-run-session -- sh -c "(echo $VSCODE_KEYRING_PASS | gnome-keyring-daemon --unlock) && code-server ${ARGS}"

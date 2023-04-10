@@ -1,36 +1,32 @@
 FROM ubuntu:jammy
 LABEL NAME fred78290/vscode-server
 
+ENV VSCODE_SERVER_HOME_DIR=/home/vscode-server
 ENV VSCODE_SERVER_DATA_DIR=/usr/share/vscode-server
 ENV TINI_VERSION v0.19.0
+ENV VSCODE_KEYRING_PASS=
 
-EXPOSE 8080
+EXPOSE 8000
 
 RUN export DEBIAN_FRONTEND=noninteractive ; apt update; \
 	apt dist-upgrade -y; \
-	apt install sudo nano gettext-base wget curl build-essential openssh-client nginx iproute2 libsecret-1-0 -y; \
+	apt install nano gettext-base wget curl git build-essential openssh-client iproute2 libsecret-1-0 dbus-user-session gnome-keyring ca-certificates -y --no-install-recommends; \
 	apt autoclean ; \
-	apt-get clean ; \
-	rm -rf  /usr/share/doc /usr/share/doc-base
+	apt-get clean -y ; \
+	rm -rf  /usr/share/doc /usr/share/doc-base /var/lib/apt/lists/*
 
-ADD docker-entrypoint.d /docker-entrypoint.d
 ADD docker-entrypoint.sh /docker-entrypoint.sh
-ADD nginx/templates /etc/nginx/templates
-ADD nginx/tcpconf.d /etc/nginx/tcpconf.d
-ADD nginx/nginx.conf /etc/nginx/nginx.conf
 
 RUN [ "$(uname -p)" = "x86_64" ] && ARCH=amd64 || ARCH=arm64; wget https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-${ARCH} -O /usr/local/bin/tini
 
-RUN groupadd -g 1000 vscode-server && \
-    adduser --uid 1000 --gid 1000 --home /usr/share/vscode-server vscode-server && \
-    adduser vscode-server root && \
-    chown -R 1000:1000 /usr/share/vscode-server && \
-	chmod +x /usr/local/bin/tini /docker-entrypoint.sh && \
-	chown -R vscode-server /etc/nginx && \
-	rm /etc/nginx/sites-enabled/* && \
-	echo 'vscode-server ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/vscode-server
+RUN groupadd -g 1000 vscode-server \
+    && adduser --uid 1000 --gid 1000 --home ${VSCODE_SERVER_HOME_DIR} vscode-server \
+    && adduser vscode-server root \
+	&& mkdir -p ${VSCODE_SERVER_DATA_DIR} \
+    && chown -R vscode-server:vscode-server ${VSCODE_SERVER_DATA_DIR} \
+	&& chmod +x /usr/local/bin/tini /docker-entrypoint.sh
 
-WORKDIR /usr/share/vscode-server/sources
+WORKDIR ${VSCODE_SERVER_HOME_DIR}
 
 RUN wget -O- https://aka.ms/install-vscode-server/setup.sh | sh
 

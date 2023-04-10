@@ -1,2 +1,0 @@
-export NET_IF=$(ip route get 1 | awk '{print $5;exit}')
-export EXTERNAL_IP=$(ip addr show ${NET_IF} | grep -m 1 "inet\s" | tr '/' ' ' | awk '{print $2}')
