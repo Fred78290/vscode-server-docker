@@ -8,14 +8,16 @@ EXPOSE 8080
 
 RUN export DEBIAN_FRONTEND=noninteractive ; apt update; \
 	apt dist-upgrade -y; \
-	apt install sudo nano gettext-base wget curl build-essential openssh-client nginx iproute2 -y; \
+	apt install sudo nano gettext-base wget curl build-essential openssh-client nginx iproute2 libsecret-1-0 -y; \
 	apt autoclean ; \
 	apt-get clean ; \
 	rm -rf  /usr/share/doc /usr/share/doc-base
 
 ADD docker-entrypoint.d /docker-entrypoint.d
 ADD docker-entrypoint.sh /docker-entrypoint.sh
-ADD nginx/* /etc/nginx
+ADD nginx/templates /etc/nginx/templates
+ADD nginx/tcpconf.d /etc/nginx/tcpconf.d
+ADD nginx/nginx.conf /etc/nginx/nginx.conf
 
 RUN [ "$(uname -p)" = "x86_64" ] && ARCH=amd64 || ARCH=arm64; wget https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-${ARCH} -O /usr/local/bin/tini
 
@@ -24,9 +26,11 @@ RUN groupadd -g 1000 vscode-server && \
     adduser vscode-server root && \
     chown -R 1000:1000 /usr/share/vscode-server && \
 	chmod +x /usr/local/bin/tini /docker-entrypoint.sh && \
+	chown -R vscode-server /etc/nginx && \
+	rm /etc/nginx/sites-enabled/* && \
 	echo 'vscode-server ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/vscode-server
 
-WORKDIR /usr/share/vscode-server
+WORKDIR /usr/share/vscode-server/sources
 
 RUN wget -O- https://aka.ms/install-vscode-server/setup.sh | sh
 

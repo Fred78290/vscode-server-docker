@@ -1,7 +1,5 @@
 #!/bin/bash
+IMAGE=devregistry.aldunelabs.com/vscode-server:v0.0.0
 
-VERSION=v0.1.0
-REGISTRY=fred78290
-IMAGE=${REGISTRY}/vscode-server
-
-docker buildx build --pull --platform linux/amd64,linux/arm64 --push -t ${IMAGE}:${VERSION} .
+docker rmi ${IMAGE}
+docker build --no-cache -t ${IMAGE} .

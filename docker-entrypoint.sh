@@ -48,8 +48,6 @@ else
 	entrypoint_log "$0: No files found in /docker-entrypoint.d/, skipping configuration"
 fi
 
-cat /etc/nginx/nginx.conf
-
-/usr/bin/sudo /usr/sbin/nginx -c /etc/nginx/nginx.conf -g "daemon on; master_process on;"
+/usr/sbin/nginx -c /etc/nginx/nginx.conf -g "daemon on; master_process on;"
 
 exec code-server --accept-server-license-terms ${ARGS}
