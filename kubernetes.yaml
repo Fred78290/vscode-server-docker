@@ -44,7 +44,38 @@ spec:
         app.kubernetes.io/name: vscode-server
     spec:
       serviceAccountName: vscode-server
+#    initContainers:
+#        - name: init-dind-daemon
+#          image: busybox
+#          securityContext:
+#            privileged: true
+#          command:
+#            - /bin/sh
+#            - '-c'
+#            - 'rm -rf /var/run/*'
+#          volumeMounts:
+#            - mountPath: /var/run
+#              name: docker-graph-run
       containers:
+        - name: dind-daemon
+          image: docker:dind
+          imagePullPolicy: Always
+          securityContext:
+            privileged: true
+          resources:
+            limits:
+              cpu: 4.0
+              memory: 4G
+            requests:
+              cpu: 200m
+              memory: 512Mi
+          volumeMounts:
+            - name: docker-graph-storage
+              mountPath: /var/lib/docker
+            - name: docker-graph-certs
+              mountPath: /certs
+            - name: docker-graph-run
+              mountPath: /var/run
         - name: vscode-server
           image: fred78290/vscode-server:v0.1.0
           imagePullPolicy: Always
@@ -53,19 +84,35 @@ spec:
               name: http
           volumeMounts:
             - mountPath: /usr/share/vscode-server
-              name: vscode-server
+              name: vscode-server-data
+            - mountPath: /home/vscode-server/sources
+              name: vscode-server-sources
+            - mountPath: /certs
+              name: docker-graph-certs
+            - mountPath: /var/run
+              name: docker-graph-run
           env:
             - name: VSCODE_KEYRING_PASS
-              value: 3742BC84-6F7B-40D4-9AC7-6C79AF508126
+              value: ${VSCODE_KEYRING_PASS}
+            - name: VSCODE_SERVER_DATA_DIR
+              value: /usr/share/vscode-server
           resources:
             limits:
               cpu: 4.0
               memory: 8G
             requests:
               cpu: 500m
-              memory: 512mi
+              memory: 512Mi
       volumes:
-        - name: vscode-server
+        - name: docker-graph-run
+          emptyDir: {}
+        - name: docker-graph-certs
+          emptyDir: {}
+        - name: docker-graph-storage
+          emptyDir: {}
+        - name: vscode-server-data
+          emptyDir: {}
+        - name: vscode-server-sources
           persistentVolumeClaim:
             claimName: vscode-server
 ---
@@ -94,21 +141,21 @@ metadata:
   name: vscode-server-ingress
   namespace: vscode-server
   annotations:
-    nginx.ingress.kubernetes.io/use-regex: 'true'
+    nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /$1
     nginx.ingress.kubernetes.io/backend-protocol: HTTP
-    nginx.ingress.kubernetes.io/secure-backends: 'false'
+    nginx.ingress.kubernetes.io/secure-backends: "false"
     nginx.ingress.kubernetes.io/auth-type: basic
     nginx.ingress.kubernetes.io/auth-secret: basic-auth
-    nginx.ingress.kubernetes.io/auth-realm: 'Authentication Required - vscode'
+    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required - vscode"
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: public
   rules:
-    - host: vscode-server.aldunelabs.com
+    - host: ${VSCODE_HOSTNAME}
       http:
         paths:
-          - path: '/(.*)'
+          - path: "/(.*)"
             pathType: ImplementationSpecific
             backend:
               service:
