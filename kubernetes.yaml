@@ -77,7 +77,7 @@ spec:
             - name: docker-graph-run
               mountPath: /var/run
         - name: vscode-server
-          image: $VSCODE_SERVER_REGISTRY/vscode-server
+          image: ${VSCODE_SERVER_REGISTRY}/vscode-server
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
