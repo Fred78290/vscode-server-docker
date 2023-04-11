@@ -1,4 +1,8 @@
 #!/bin/bash
+set -o pipefail -o nounset
+
+: "${VSCODE_SERVER_REGISTRY:?Variable not set or empty}"
+
 export VSCODE_USER=$USER
 export VSCODE_PASSWORD=$(uuidgen)
 export VSCODE_HOSTNAME=vscode-server.acme.com
