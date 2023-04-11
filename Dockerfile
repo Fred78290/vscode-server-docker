@@ -10,9 +10,10 @@ EXPOSE 8000
 
 RUN export DEBIAN_FRONTEND=noninteractive ; apt update; \
 	apt dist-upgrade -y; \
-	apt install nano gettext-base wget curl git build-essential openssh-client iproute2 libsecret-1-0 dbus-user-session gnome-keyring ca-certificates -y --no-install-recommends; \
+	apt install nano sudo gettext-base node wget curl git build-essential openssh-client iproute2 libsecret-1-0 dbus-user-session gnome-keyring ca-certificates -y --no-install-recommends; \
 	apt autoclean ; \
 	apt-get clean -y ; \
+	echo 'vscode-server ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/vscode-server ; \
 	rm -rf  /usr/share/doc /usr/share/doc-base /var/lib/apt/lists/*
 
 ADD docker-entrypoint.sh /docker-entrypoint.sh
