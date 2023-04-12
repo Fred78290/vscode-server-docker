@@ -1,10 +1,16 @@
-# VSCode Server in docker
+# VSCode Server in a browser
 
-This project is a simple way to embed vscode server in a docker container and serving vscode for remote development.
+<p align="center">
+<img src="./images/vscode.png" alt="vscode" />
+</p>
 
-The environment include, nodejs, npm, golang, php.
+This project is a simple way to embed vscode server in a docker container or a kubernetes cluster and serving vscode for remote development.
 
-## Env variables
+The environment include theses tools : nodejs, npm, yarn, golang, php.
+
+If you need more tools or package, do sudo in a terminal to grant access.
+
+## Variables
 
 Before to build or deploy vscode-server, you need to declare some variables
 
@@ -12,7 +18,6 @@ Before to build or deploy vscode-server, you need to declare some variables
 export VSCODE_SERVER_IMAGE=fred78290/vscode-server:v0.1.0
 export VSCODE_HOSTNAME=vscode-server.acme.com
 ````
-
 
 ## Build it
 
