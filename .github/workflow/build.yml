@@ -46,3 +46,7 @@ jobs:
           fi
 
           ./buildx.sh
+
+          pushd vscode-server-helper
+
+          make -e REGISTRY=$VSCODE_SERVER_REGISTRY -e TAG="${IMAGE_TAG}" container-push-manifest

@@ -1,0 +1,30 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		}
+	],
+	"settings": {
+		"terminal.integrated.env.linux": {
+			"DEV_VSCODE_SERVER_REGISTRY": "devregistry.aldunelabs.com",
+			"DEV_VSCODE_HOSTNAME": "localhost.aldunelabs.com"
+		},
+		"terminal.integrated.env.osx": {
+			"DEV_VSCODE_SERVER_REGISTRY": "devregistry.aldunelabs.com",
+			"DEV_VSCODE_HOSTNAME": "localhost.aldunelabs.com"
+		}
+	},
+	"launch": {
+		"version": "0.2.0",
+		"configurations": [
+			{
+				"name": "Launch vscode-server-helper",
+				"type": "go",
+				"request": "launch",
+				"mode": "auto",
+				"cwd": "${workspaceFolder}/vscode-server-helper",
+				"program": "${workspaceFolder}/vscode-server-helper"
+			}	
+		]
+	}
+}

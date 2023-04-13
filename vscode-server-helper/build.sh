@@ -5,7 +5,9 @@ set -o pipefail -o nounset
 
 DEV_VSCODE_SERVER_REGISTRY=${DEV_VSCODE_SERVER_REGISTRY:=${VSCODE_SERVER_REGISTRY}}
 
-IMAGE=${DEV_VSCODE_SERVER_REGISTRY}/vscode-server:v0.0.0
+sudo rm -rf out
 
-docker rmi ${IMAGE}
-docker build --no-cache -t ${IMAGE} .
+VERSION=${IMAGE_TAG:=v0.1.0}
+IMAGE=${DEV_VSCODE_SERVER_REGISTRY}/vscode-server-helper
+
+make -e REGISTRY=$VSCODE_SERVER_REGISTRY -e TAG=$VERSION container-push-manifest
