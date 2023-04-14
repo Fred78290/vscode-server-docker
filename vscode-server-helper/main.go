@@ -25,7 +25,7 @@ func serve(cfg *types.Config) error {
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		if user, found := req.Header["X-User"]; found {
-			generator.CreateCodeSpace(user[0], cfg, w, req)
+			generator.CreateCodeSpace(user[0], w, req)
 		} else {
 			req.Response.StatusCode = 401
 

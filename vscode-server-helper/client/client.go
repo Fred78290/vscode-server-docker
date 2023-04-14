@@ -30,6 +30,7 @@ type SingletonClientGenerator struct {
 	MaxGracePeriod   time.Duration
 	NodeReadyTimeout time.Duration
 	kubeClient       kubernetes.Interface
+	cfg              *types.Config
 	kubeOnce         sync.Once
 }
 
@@ -41,6 +42,7 @@ func NewClientGenerator(cfg *types.Config) types.ClientGenerator {
 		NodeReadyTimeout: cfg.NodeReadyTimeout,
 		DeletionTimeout:  cfg.DeletionTimeout,
 		MaxGracePeriod:   cfg.MaxGracePeriod,
+		cfg:              cfg,
 	}
 }
 
@@ -129,11 +131,11 @@ func (p *SingletonClientGenerator) CreateNameSpace(namespace string) error {
 	return nil
 }
 
-func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, cfg *types.Config, w http.ResponseWriter, req *http.Request) error {
+func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) error {
 	var err error
 	var exists bool
 
-	redirect := *cfg.GetRedirectURL()
+	redirect := *p.cfg.GetRedirectURL()
 
 	if exists, err = p.NameSpaceExists(currentUser); err != nil {
 
