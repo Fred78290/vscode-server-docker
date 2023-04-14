@@ -71,6 +71,7 @@ spec:
             - --client-id=${VSCODE_OAUTH2_PROXY_CLIENT_ID}
             - --client-secret=${VSCODE_OAUTH2_PROXY_CLIENT_SECRET}
             - --cookie-secret=${VSCODE_OAUTH2_PROXY_COOKIE_SECRET}
+            - --scope=${VSCODE_OAUTH2_PROXY_SCOPE}
             - --email-domain=*
             - --upstream=file:///dev/null
             - --http-address=0.0.0.0:4180

@@ -7,11 +7,19 @@
 	"settings": {
 		"terminal.integrated.env.linux": {
 			"DEV_VSCODE_SERVER_REGISTRY": "devregistry.aldunelabs.com",
-			"DEV_VSCODE_HOSTNAME": "localhost.aldunelabs.com"
+			"DEV_VSCODE_HOSTNAME": "localhost.aldunelabs.com",
+			"VSCODE_OAUTH2_PROXY_PROVIDER": "${env:GITHUB_OAUTH2_PROXY_PROVIDER}",
+			"VSCODE_OAUTH2_PROXY_CLIENT_ID": "${env:GITHUB_OAUTH2_PROXY_CLIENT_ID}",
+			"VSCODE_OAUTH2_PROXY_CLIENT_SECRET": "${env:GITHUB_OAUTH2_PROXY_CLIENT_SECRET}",
+			"VSCODE_OAUTH2_PROXY_SCOPE": "${env:GITHUB_OAUTH2_PROXY_SCOPE}"
 		},
 		"terminal.integrated.env.osx": {
 			"DEV_VSCODE_SERVER_REGISTRY": "devregistry.aldunelabs.com",
-			"DEV_VSCODE_HOSTNAME": "localhost.aldunelabs.com"
+			"DEV_VSCODE_HOSTNAME": "localhost.aldunelabs.com",
+			"VSCODE_OAUTH2_PROXY_PROVIDER": "${env:GITHUB_OAUTH2_PROXY_PROVIDER}",
+			"VSCODE_OAUTH2_PROXY_CLIENT_ID": "${env:GITHUB_OAUTH2_PROXY_CLIENT_ID}",
+			"VSCODE_OAUTH2_PROXY_CLIENT_SECRET": "${env:GITHUB_OAUTH2_PROXY_CLIENT_SECRET}",
+			"VSCODE_OAUTH2_PROXY_SCOPE": "${env:GITHUB_OAUTH2_PROXY_SCOPE}"
 		}
 	},
 	"launch": {
@@ -23,8 +31,14 @@
 				"request": "launch",
 				"mode": "auto",
 				"cwd": "${workspaceFolder}/vscode-server-helper",
-				"program": "${workspaceFolder}/vscode-server-helper"
-			}	
+				"program": "${workspaceFolder}/vscode-server-helper",
+				"args": [
+					"--prefix=/create-space",
+					"--vscode-namespace=vscode-server",
+					"--vscode-template-file=${workspaceFolder}/kubernetes/multi-account/template.yaml",
+					"--listen=0.0.0.0:8000"
+				]
+			}
 		]
 	}
 }

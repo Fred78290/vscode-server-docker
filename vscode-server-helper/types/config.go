@@ -1,20 +1,23 @@
-package main
+package types
 
 import (
-	"fmt"
-	"net/http"
 	"net/url"
 	"time"
 
+	"github.com/Fred78290/vscode-server-helper/utils"
 	"github.com/alecthomas/kingpin"
-	requestutil "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/requests/util"
 	glog "github.com/sirupsen/logrus"
+
+	"k8s.io/component-base/cli"
+	"k8s.io/kubectl/pkg/cmd"
+	"k8s.io/kubectl/pkg/cmd/util"
 )
 
 type Config struct {
 	Listen                string
 	RedirectURL           string
 	KubeConfig            string
+	APIServerURL          string
 	VSCodeTemplatePath    string
 	VSCodeServerNameSpace string
 	RequestTimeout        time.Duration
@@ -62,6 +65,15 @@ func NewConfig() *Config {
 	}
 }
 
+func kubectl() {
+	command := cmd.NewDefaultKubectlCommand()
+
+	if err := cli.RunNoErrOutput(command); err != nil {
+		// Pretty-print the error and exit with an error.
+		util.CheckErr(err)
+	}
+}
+
 // allLogLevelsAsStrings returns all logrus levels as a list of strings
 func allLogLevelsAsStrings() []string {
 	var levels []string
@@ -91,6 +103,7 @@ func (cfg *Config) ParseFlags(args []string, version string) error {
 	app.Flag("tls-key-file", "Locate the tls key file").Default(cfg.TlsKey).StringVar(&cfg.TlsKey)
 	app.Flag("tls-cert-file", "Locate the tls cert file").Default(cfg.TlsCert).StringVar(&cfg.TlsCert)
 
+	app.Flag("server", "The Kubernetes API server to connect to (default: auto-detect)").Default(cfg.APIServerURL).StringVar(&cfg.APIServerURL)
 	app.Flag("kubeconfig", "Retrieve target cluster configuration from a Kubernetes configuration file (default: auto-detect)").Default(cfg.KubeConfig).StringVar(&cfg.KubeConfig)
 	app.Flag("request-timeout", "Request timeout when calling Kubernetes APIs. 0s means no timeout").Default(DefaultMaxRequestTimeout.String()).DurationVar(&cfg.RequestTimeout)
 	app.Flag("deletion-timeout", "Deletion timeout when delete node. 0s means no timeout").Default(DefaultMaxDeletionPeriod.String()).DurationVar(&cfg.DeletionTimeout)
@@ -118,25 +131,10 @@ func (cfg *Config) ParseFlags(args []string, version string) error {
 	return err
 }
 
-func (cfg *Config) String() string {
-	return ToJSON(cfg)
+func (cfg *Config) GetRedirectURL() *url.URL {
+	return cfg.redirectURL
 }
 
-func (cfg *Config) HandleRequest(w http.ResponseWriter, req *http.Request) error {
-	redirect := *cfg.redirectURL
-
-	for name, headers := range req.Header {
-		for _, h := range headers {
-			fmt.Fprintf(w, "%v: %v\n", name, h)
-		}
-	}
-
-	if cfg.redirectURL.Host == "" {
-		redirect.Host = requestutil.GetRequestHost(req)
-		redirect.Scheme = requestutil.GetRequestProto(req)
-	}
-
-	http.Redirect(w, req, redirect.String(), http.StatusTemporaryRedirect)
-
-	return nil
+func (cfg *Config) String() string {
+	return utils.ToJSON(cfg)
 }
