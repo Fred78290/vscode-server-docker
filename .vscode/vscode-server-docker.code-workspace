@@ -32,6 +32,9 @@
 				"mode": "auto",
 				"cwd": "${workspaceFolder}/vscode-server-helper",
 				"program": "${workspaceFolder}/vscode-server-helper",
+				"env": {
+					"KUBECTL_ENABLE_CMD_SHADOW": "true"
+				},
 				"args": [
 					"--prefix=/create-space",
 					"--vscode-namespace=vscode-server",
