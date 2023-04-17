@@ -303,6 +303,35 @@ spec:
           ports:
             - containerPort: 8000
               protocol: TCP
+          env:
+            - name: DIND_CPU_MAX
+              value: ${DIND_CPU_MAX}
+            - name: DIND_CPU_REQUEST
+              value: ${DIND_CPU_REQUEST}
+            - name: DIND_MEM_MAX
+              value: ${DIND_MEM_MAX}
+            - name: DIND_CPU_REQUEST
+              value: ${DIND_CPU_REQUEST}
+            - name: NGINX_INGRESS_CLASS
+              value: ${NGINX_INGRESS_CLASS}
+            - name: VSCODE_SERVER_IMAGE
+              value: ${VSCODE_SERVER_IMAGE}
+            - name: VSCODE_HOSTNAME
+              value: ${VSCODE_HOSTNAME}
+            - name: VSCODE_PVC_SIZE
+              value: ${VSCODE_PVC_SIZE}
+            - name: VSCODE_CPU_MAX
+              value: ${VSCODE_CPU_MAX}
+            - name: VSCODE_CPU_REQUEST
+              value: ${VSCODE_CPU_REQUEST}
+            - name: VSCODE_MEM_MAX
+              value: ${VSCODE_MEM_MAX}
+            - name: VSCODE_MEM_REQUEST
+              value: ${VSCODE_MEM_REQUEST}
+            - name: VSCODE_KEYRING_PASS
+              value: ${VSCODE_KEYRING_PASS}
+            - name: VSCODE_SERVER_DATA_DIR
+              value: /usr/share/vscode-server
           volumeMounts:
             - mountPath: /usr/share/vscode-server-helper/template.yaml
               name: vscode-server-template

@@ -21,8 +21,11 @@ import (
 
 	appv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8sjson "k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -30,34 +33,61 @@ import (
 	"k8s.io/component-base/cli"
 	"k8s.io/kubectl/pkg/cmd"
 	"k8s.io/kubectl/pkg/cmd/plugin"
+	"k8s.io/kubectl/pkg/cmd/util"
 )
 
-const appLabel = "app.kubernetes.io/name"
+const (
+	appLabel       = "app.kubernetes.io/name"
+	deploymentName = "vscode-server"
+	ingressName    = "vscode-server-%s"
+	contentType    = "Content-Type"
+	textPlain      = "text/plain"
+)
 
 var defaultConfigFlags = genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag().WithDiscoveryBurst(300).WithDiscoveryQPS(50.0)
 
 // SingletonClientGenerator provides clients
 type SingletonClientGenerator struct {
-	KubeConfig       string
-	APIServerURL     string
-	RequestTimeout   time.Duration
-	DeletionTimeout  time.Duration
-	MaxGracePeriod   time.Duration
-	NodeReadyTimeout time.Duration
-	kubeClient       kubernetes.Interface
-	cfg              *types.Config
-	kubeOnce         sync.Once
+	KubeConfig         string
+	APIServerURL       string
+	RequestTimeout     time.Duration
+	DeletionTimeout    time.Duration
+	MaxGracePeriod     time.Duration
+	ObjectReadyTimeout time.Duration
+	kubeClient         kubernetes.Interface
+	cfg                *types.Config
+	kubeOnce           sync.Once
+}
+
+func encodeToYaml(obj runtime.Object) string {
+
+	if obj == nil {
+		return ""
+	}
+
+	var outBuffer bytes.Buffer
+	writer := bufio.NewWriter(&outBuffer)
+
+	e := k8sjson.NewYAMLSerializer(k8sjson.DefaultMetaFactory, nil, nil)
+
+	if err := e.Encode(obj, writer); err != nil {
+		return ""
+	}
+
+	writer.Flush()
+
+	return outBuffer.String()
 }
 
 func NewClientGenerator(cfg *types.Config) types.ClientGenerator {
 	return &SingletonClientGenerator{
-		KubeConfig:       cfg.KubeConfig,
-		APIServerURL:     cfg.APIServerURL,
-		RequestTimeout:   cfg.RequestTimeout,
-		NodeReadyTimeout: cfg.NodeReadyTimeout,
-		DeletionTimeout:  cfg.DeletionTimeout,
-		MaxGracePeriod:   cfg.MaxGracePeriod,
-		cfg:              cfg,
+		KubeConfig:         cfg.KubeConfig,
+		APIServerURL:       cfg.APIServerURL,
+		RequestTimeout:     cfg.RequestTimeout,
+		ObjectReadyTimeout: cfg.ObjectReadyTimeout,
+		DeletionTimeout:    cfg.DeletionTimeout,
+		MaxGracePeriod:     cfg.MaxGracePeriod,
+		cfg:                cfg,
 	}
 }
 
@@ -138,7 +168,40 @@ func (p *SingletonClientGenerator) KubeClient() (kubernetes.Interface, error) {
 	return p.kubeClient, err
 }
 
-func (p *SingletonClientGenerator) NameSpaceExists(namespace string) (bool, error) {
+func (p *SingletonClientGenerator) kubectl(args ...string) (string, error) {
+	var outBuffer bytes.Buffer
+	var err error
+
+	stdout := bufio.NewWriter(&outBuffer)
+
+	util.BehaviorOnFatal(func(msg string, code int) {
+		if len(msg) > 0 {
+			// add newline if needed
+			if !strings.HasSuffix(msg, "\n") {
+				msg += "\n"
+			}
+			fmt.Fprint(stdout, msg)
+		}
+	})
+
+	kubectl := cmd.NewDefaultKubectlCommandWithArgs(cmd.KubectlOptions{
+		PluginHandler: cmd.NewDefaultPluginHandler(plugin.ValidPluginFilenamePrefixes),
+		Arguments:     args,
+		ConfigFlags:   defaultConfigFlags,
+		IOStreams:     genericclioptions.IOStreams{In: os.Stdin, Out: stdout, ErrOut: stdout},
+	})
+
+	kubectl.SetArgs(args[1:])
+	kubectl.SetIn(os.Stdin)
+	kubectl.SetOut(stdout)
+	kubectl.SetErr(stdout)
+
+	err = cli.RunNoErrOutput(kubectl)
+
+	return outBuffer.String(), err
+}
+
+func (p *SingletonClientGenerator) CodeSpaceExists(userName string) (bool, error) {
 	var ns *v1.Namespace
 	kubeclient, err := p.KubeClient()
 
@@ -149,7 +212,7 @@ func (p *SingletonClientGenerator) NameSpaceExists(namespace string) (bool, erro
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	ns, err = kubeclient.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	ns, err = kubeclient.CoreV1().Namespaces().Get(ctx, userName, metav1.GetOptions{})
 
 	if kerr, ok := err.(*errors.StatusError); ok {
 		if kerr.ErrStatus.Code == 404 {
@@ -164,185 +227,332 @@ func (p *SingletonClientGenerator) NameSpaceExists(namespace string) (bool, erro
 	return true, nil
 }
 
-func (p *SingletonClientGenerator) waitAppReady(namespace, name string) (bool, error) {
+func (p *SingletonClientGenerator) waitNameSpaceReady(ctx *context.Context, userName string) (bool, error) {
 	var ns *v1.Namespace
-	var app *appv1.Deployment
-	ready := false
+
 	kubeclient, err := p.KubeClient()
 
-	if err == nil {
+	if err = utils.PollImmediate(time.Second, p.ObjectReadyTimeout, func() (bool, error) {
+		ns, err = kubeclient.CoreV1().Namespaces().Get(ctx, userName, metav1.GetOptions{})
 
-		ctx := p.newRequestContext()
-		defer ctx.Cancel()
-
-		glog.Infof("Wait kubernetes app %s/%s to be ready", namespace, name)
-
-		if err = utils.PollImmediate(time.Second, p.NodeReadyTimeout, func() (bool, error) {
-			ns, err = kubeclient.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
-
-			if err != nil {
-				return false, err
-			}
-
-			return ns.Status.Phase == v1.NamespaceActive, nil
-		}); err != nil {
+		if err != nil {
 			return false, err
 		}
 
-		if err = utils.PollImmediate(time.Second, p.NodeReadyTimeout, func() (bool, error) {
-			apps := kubeclient.AppsV1().Deployments(namespace)
+		return ns.Status.Phase == v1.NamespaceActive, nil
+	}); err != nil {
+		return false, err
+	}
 
-			app, err = apps.Get(ctx, name, metav1.GetOptions{})
-			if err != nil {
-				return false, err
+	return true, nil
+}
+
+func (p *SingletonClientGenerator) waitIngressReady(ctx *context.Context, userName, name string) (bool, error) {
+	var ing *networkingv1.Ingress
+	kubeclient, err := p.KubeClient()
+
+	if err = utils.PollImmediate(time.Second, p.ObjectReadyTimeout, func() (bool, error) {
+		if ing, err = kubeclient.NetworkingV1().Ingresses(userName).Get(ctx, name, metav1.GetOptions{}); err != nil {
+			return false, err
+		}
+
+		for _, status := range ing.Status.LoadBalancer.Ingress {
+			if status.IP != "" {
+				return true, nil
 			}
+		}
+
+		return false, nil
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (p *SingletonClientGenerator) saveTemplate(yaml string) (string, error) {
+	if f, err := os.CreateTemp("", "template.yml"); err != nil {
+		return "", err
+	} else {
+		defer f.Close()
+
+		_, err = f.WriteString(yaml)
+
+		return f.Name(), err
+	}
+}
+
+func (p *SingletonClientGenerator) waitDeploymentReady(ctx *context.Context, userName, name string) (bool, error) {
+	var app *appv1.Deployment
+	kubeclient, err := p.KubeClient()
+
+	if err = utils.PollImmediate(time.Second, p.ObjectReadyTimeout, func() (bool, error) {
+		apps := kubeclient.AppsV1().Deployments(userName)
+
+		if app, err = apps.Get(ctx, name, metav1.GetOptions{}); err == nil {
 
 			for _, status := range app.Status.Conditions {
 				if status.Type == appv1.DeploymentAvailable {
+
 					if b, e := strconv.ParseBool(string(status.Status)); e == nil {
 						if b {
-							glog.Debugf("app %s/%s marked ready with replicas=%d, read replicas=%d", namespace, name, app.Status.Replicas, app.Status.ReadyReplicas)
+							glog.Debugf("app %s/%s marked ready with replicas=%d, read replicas=%d", userName, name, app.Status.Replicas, app.Status.ReadyReplicas)
+
 							return app.Status.Replicas == app.Status.ReadyReplicas, nil
 						}
 					}
+
 				} else if status.Type == appv1.DeploymentReplicaFailure {
-					return false, fmt.Errorf("app %s/%s replica failure: %v", namespace, name, status.String())
+					return false, fmt.Errorf("app %s/%s replica failure: %v", userName, name, status.String())
 				}
 			}
-
-			return false, nil
-		}); err == nil {
-			glog.Infof("The kubernetes app %s/%s is Ready", namespace, name)
-			ready = true
-		} else {
-			err = fmt.Errorf("app %s/%s is not ready, %v", namespace, name, err)
 		}
+
+		return false, err
+	}); err != nil {
+		err = fmt.Errorf("app %s/%s is not ready, %v", userName, name, err)
+
+		return false, err
 	}
 
-	return ready, err
+	glog.Infof("The kubernetes app %s/%s is Ready", userName, name)
+
+	return true, err
 }
 
-func (p *SingletonClientGenerator) getNameSpaceConfigMapAndSecrets(namespace string) (configmap string, secrets string, err error) {
-	var cm *v1.ConfigMap
-	var secret *v1.Secret
+func (p *SingletonClientGenerator) waitAppReady(userName string) (bool, error) {
+	ctx := p.newRequestContext()
+	defer ctx.Cancel()
+
+	glog.Infof("Wait kubernetes app %s/%s to be ready", userName, deploymentName)
+
+	if ready, err := p.waitNameSpaceReady(ctx, userName); err != nil || !ready {
+		return ready, err
+	} else if ready, err := p.waitDeploymentReady(ctx, userName, userName); err != nil || !ready {
+		return ready, err
+	} else {
+		return p.waitIngressReady(ctx, userName, userName)
+	}
+
+}
+
+func (p *SingletonClientGenerator) getNameSpaceConfigMapAndSecretsAndTls(userName string) (string, string, string, error) {
+	var gotCM *v1.ConfigMap
+	var gotSecret *v1.Secret
+	var tls *v1.Secret
+	cm := &v1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "ConfigMap",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      userName,
+			Namespace: userName,
+			Labels: map[string]string{
+				appLabel: userName,
+			},
+		},
+	}
+
+	secret := &v1.Secret{
+		Type: "Opaque",
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Secret",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      userName,
+			Namespace: userName,
+			Labels: map[string]string{
+				appLabel: userName,
+			},
+		},
+	}
+
 	kubeclient, err := p.KubeClient()
 
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	if cm, err = kubeclient.CoreV1().ConfigMaps(p.cfg.VSCodeServerNameSpace).Get(ctx, namespace, metav1.GetOptions{}); err != nil {
-		glog.Debugf("No configmap %s/%s found, %v", p.cfg.VSCodeServerNameSpace, namespace, err)
-
-		cm = &v1.ConfigMap{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       "ConfigMap",
-				APIVersion: "v1",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      namespace,
-				Namespace: namespace,
-				Labels: map[string]string{
-					appLabel: namespace,
-				},
-			},
-		}
+	if gotCM, err = kubeclient.CoreV1().ConfigMaps(p.cfg.VSCodeServerNameSpace).Get(ctx, userName, metav1.GetOptions{}); err != nil {
+		glog.Debugf("No configmap %s/%s found, %v", p.cfg.VSCodeServerNameSpace, userName, err)
 	} else {
-		glog.Debugf("Configmap %s/%s found, %s", p.cfg.VSCodeServerNameSpace, namespace, utils.ToJSON(cm))
+		glog.Debugf("Configmap %s/%s found", p.cfg.VSCodeServerNameSpace, userName)
 
-		cm.ObjectMeta = metav1.ObjectMeta{
-			Name:      namespace,
-			Namespace: namespace,
-			Labels: map[string]string{
-				appLabel: namespace,
-			},
-		}
+		cm.Data = gotCM.Data
+		cm.BinaryData = gotCM.BinaryData
 	}
 
-	if secret, err = kubeclient.CoreV1().Secrets(p.cfg.VSCodeServerNameSpace).Get(ctx, namespace, metav1.GetOptions{}); err != nil {
-		glog.Debugf("No secret %s/%s found, %v", p.cfg.VSCodeServerNameSpace, namespace, err)
+	if gotSecret, err = kubeclient.CoreV1().Secrets(p.cfg.VSCodeServerNameSpace).Get(ctx, p.cfg.VSCodeIngressTlsSecret, metav1.GetOptions{}); err != nil {
+		glog.Debugf("No secret %s/%s found, %v", p.cfg.VSCodeServerNameSpace, p.cfg.VSCodeIngressTlsSecret, err)
+	} else {
+		glog.Debugf("Tls %s/%s found", p.cfg.VSCodeServerNameSpace, p.cfg.VSCodeIngressTlsSecret)
 
-		secret = &v1.Secret{
-			Type: "Opaque",
+		tls = &v1.Secret{
+			Type: "kubernetes.io/tls",
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "Secret",
 				APIVersion: "v1",
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      namespace,
-				Namespace: namespace,
+				Name:      p.cfg.VSCodeIngressTlsSecret,
+				Namespace: userName,
 				Labels: map[string]string{
-					appLabel: namespace,
+					appLabel: userName,
 				},
 			},
-		}
-	} else {
-		glog.Debugf("Secret %s/%s found, %s", p.cfg.VSCodeServerNameSpace, namespace, utils.ToJSON(secret))
-
-		secret.ObjectMeta = metav1.ObjectMeta{
-			Name:      namespace,
-			Namespace: namespace,
-			Labels: map[string]string{
-				appLabel: namespace,
-			},
+			Data: gotSecret.Data,
 		}
 	}
 
-	return utils.ToYAML(cm), utils.ToYAML(secret), nil
+	if gotSecret, err = kubeclient.CoreV1().Secrets(p.cfg.VSCodeServerNameSpace).Get(ctx, userName, metav1.GetOptions{}); err != nil {
+		glog.Debugf("No secret %s/%s found, %v", p.cfg.VSCodeServerNameSpace, userName, err)
+	} else {
+		glog.Debugf("Secret %s/%s found", p.cfg.VSCodeServerNameSpace, userName)
+
+		secret.Data = gotSecret.Data
+	}
+
+	return encodeToYaml(cm), encodeToYaml(secret), encodeToYaml(tls), nil
 }
 
-func (p *SingletonClientGenerator) CreateNameSpace(namespace string) error {
+func (p *SingletonClientGenerator) applyTemplate(yaml string) (err error) {
+	var out string
+	var templateFile string
+
+	fmt.Println(yaml)
+
+	if templateFile, err = p.saveTemplate(yaml); err != nil {
+		return err
+	}
+
+	defer func() {
+		os.Remove(templateFile)
+	}()
+
+	if out, err = p.kubectl("kubectl", "apply", "-f", templateFile); err != nil {
+		glog.Errorf("kubectl got an error: %s, %v", out, err)
+	}
+
+	return err
+}
+
+func (p *SingletonClientGenerator) deleteUserCodespace(userName string) error {
+	var out string
+	var err error
+
+	if out, err = p.kubectl("kubectl", "delete", "ns", userName); err != nil {
+		glog.Errorf("kubectl got an error: %s, %v", out, err)
+	}
+
+	return err
+}
+
+func (p *SingletonClientGenerator) createUserCodespace(userName string) error {
 	var template []byte
 	var err error
 	var yaml string
-	var configmap, secret string
+	var configmap, secret, tls string
+	ready := false
 
-	if configmap, secret, err = p.getNameSpaceConfigMapAndSecrets(namespace); err != nil {
-		glog.Errorf("Unable to get config map and secret for user: %s, %v", namespace, err)
+	if configmap, secret, tls, err = p.getNameSpaceConfigMapAndSecretsAndTls(userName); err != nil {
+		glog.Errorf("Unable to get config map and secret for user: %s, %v", userName, err)
 		return err
 	}
 
 	mapping := func(name string) string {
-		if name == "ACCOUNT_NAMESPACE" {
-			return namespace
-		} else if name == "VSCODE_NAMESPACE" {
-			return p.cfg.VSCodeServerNameSpace
-		} else if name == "ACCOUNT_CONFIGMAP" {
-			return configmap
-		} else if name == "ACCOUNT_SECRET" {
-			return secret
-		}
+		var value string
+		var found bool
 
-		return os.Getenv(name)
+		if value, found = os.LookupEnv(name); found {
+			return value
+		} else {
+			switch name {
+			case "ACCOUNT_NAMESPACE":
+				return userName
+
+			case "ACCOUNT_CONFIGMAP":
+				return configmap
+
+			case "ACCOUNT_SECRET":
+				return secret
+
+			case "INGRESS_SECRET_TLS":
+				return tls
+
+			case "VSCODE_NAMESPACE":
+				return p.cfg.VSCodeServerNameSpace
+
+			case "VSCODE_HOSTNAME":
+				return p.cfg.VSCodeHostname
+
+			case "VSCODE_PVC_SIZE":
+				return p.cfg.PersistentVolumeSize
+
+			case "VSCODE_CPU_MAX":
+				return p.cfg.MaxCpus
+
+			case "VSCODE_CPU_REQUEST":
+				return p.cfg.MinCpus
+
+			case "VSCODE_MEM_MAX":
+				return p.cfg.MaxMemory
+
+			case "VSCODE_MEM_REQUEST":
+				return p.cfg.MinMemory
+
+			default:
+				return fmt.Sprintf("$%s", name)
+			}
+		}
 	}
 
 	if template, err = os.ReadFile(p.cfg.VSCodeTemplatePath); err == nil {
 		if yaml, err = envsubst.Eval(string(template), mapping); err == nil {
-			var stdout bytes.Buffer
-			var stderr bytes.Buffer
-			var ready bool
-
-			args := []string{"kubectl", "apply", "-f", "-"}
-			kubectl := cmd.NewDefaultKubectlCommandWithArgs(cmd.KubectlOptions{
-				PluginHandler: cmd.NewDefaultPluginHandler(plugin.ValidPluginFilenamePrefixes),
-				Arguments:     args,
-				ConfigFlags:   defaultConfigFlags,
-				IOStreams:     genericclioptions.IOStreams{In: strings.NewReader(yaml), Out: bufio.NewWriter(&stdout), ErrOut: bufio.NewWriter(&stderr)},
-			})
-
-			if err = cli.RunNoErrOutput(kubectl); err == nil {
-				if ready, err = p.waitAppReady(namespace, "vscode-server"); err == nil {
-					if !ready {
-						err = fmt.Errorf("vscode-server not ready for user: %s", namespace)
+			if err = p.applyTemplate(yaml); err == nil {
+				if ready, err = p.waitAppReady(userName); err != nil || !ready {
+					if err == nil {
+						err = fmt.Errorf("vscode-server not ready for user: %s", userName)
 					}
+
+					p.deleteUserCodespace(userName)
 				}
-			} else {
-				glog.Errorf("kubectl got an error: %s, %v", stderr.String(), err)
 			}
 		}
+	}
+
+	return err
+}
+
+func (p *SingletonClientGenerator) DeleteCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) error {
+	var err error
+	var exists bool
+
+	if exists, err = p.CodeSpaceExists(currentUser); err != nil {
+
+		w.Header().Add(contentType, textPlain)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf("Unable to find user: %s, %v", currentUser, err.Error())))
+
+	} else if exists {
+
+		if err = p.deleteUserCodespace(currentUser); err == nil {
+			w.Header().Add(contentType, textPlain)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf("User %s deleted", currentUser)))
+		} else {
+			w.Header().Add(contentType, textPlain)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprintf("Unable to delete user: %s, %v", currentUser, err.Error())))
+		}
+
+	} else {
+		w.Header().Add(contentType, textPlain)
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(fmt.Sprintf("User %s not found", currentUser)))
 	}
 
 	return err
@@ -354,9 +564,9 @@ func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.Re
 
 	redirect := *p.cfg.GetRedirectURL()
 
-	if exists, err = p.NameSpaceExists(currentUser); err != nil {
+	if exists, err = p.CodeSpaceExists(currentUser); err != nil {
 
-		w.Header().Add("Content-Type", "text/plain")
+		w.Header().Add(contentType, textPlain)
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 
@@ -365,8 +575,8 @@ func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.Re
 
 	if !exists {
 
-		if err = p.CreateNameSpace(currentUser); err != nil {
-			w.Header().Add("Content-Type", "text/plain")
+		if err = p.createUserCodespace(currentUser); err != nil {
+			w.Header().Add(contentType, textPlain)
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(err.Error()))
 
@@ -378,7 +588,7 @@ func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.Re
 	if redirect.Host == "" {
 		redirect.Host = requestutil.GetRequestHost(req)
 		redirect.Scheme = requestutil.GetRequestProto(req)
-		redirect.Path = fmt.Sprintf("/%s", currentUser)
+		redirect.Path = fmt.Sprintf("/%s?folder=/home/vscode-server/sources", currentUser)
 	} else {
 		redirect.Path = fmt.Sprintf(redirect.Path, currentUser)
 	}

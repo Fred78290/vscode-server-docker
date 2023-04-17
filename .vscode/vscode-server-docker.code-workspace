@@ -33,10 +33,28 @@
 				"cwd": "${workspaceFolder}/vscode-server-helper",
 				"program": "${workspaceFolder}/vscode-server-helper",
 				"env": {
-					"KUBECTL_ENABLE_CMD_SHADOW": "true"
+					"DIND_CPU_MAX": "4",
+					"DIND_CPU_REQUEST": "200m",
+					"DIND_MEM_MAX": "4G",
+					"DIND_MEM_REQUEST": "256Mi",
+					"NGINX_INGRESS_CLASS": "nginx",
+					"VSCODE_HOSTNAME": "vscode-server-debug.aldunelabs.com",
+					"VSCODE_SERVER_IMAGE": "fred78290/vscode-server:v0.1.0",
+					"VSCODE_PVC_SIZE": "10Gi",
+					"VSCODE_CPU_MAX": "4",
+					"VSCODE_CPU_REQUEST": "500m",
+					"VSCODE_MEM_MAX": "4G",
+					"VSCODE_MEM_REQUEST": "512Mi",
+					"VSCODE_KEYRING_PASS": "123456789",
+					"VSCODE_NAMESPACE": "vscode-server",
+					"VSCODE_INGRESS_AUTH_URL": "https://macmini.aldunelabs.com:1443/oauth2/auth",
+					"VSCODE_INGRESS_AUTH_SIGNIN": "https://macmini.aldunelabs.com:1443/oauth2/start?rd=$escaped_request_uri",
+					"VSCODE_CERT_CLUSTER_ISSUER": ""
 				},
 				"args": [
+					"--redirect-url=https://vscode-server-debug.aldunelabs.com/%25s/?folder=/home/vscode-server/sources",
 					"--prefix=/create-space",
+					"--vscode-ingress-secret-tls=vscode-server-ingress-tls",
 					"--vscode-namespace=vscode-server",
 					"--vscode-template-file=${workspaceFolder}/kubernetes/multi-account/template.yaml",
 					"--listen=0.0.0.0:8000"

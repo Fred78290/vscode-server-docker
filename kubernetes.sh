@@ -13,7 +13,7 @@ export VSCODE_PASSWORD=$(uuidgen)
 export VSCODE_NAMESPACE=${VSCODE_NAMESPACE:=vscode-server}
 export VSCODE_HOSTNAME=${DEV_VSCODE_HOSTNAME:=${VSCODE_HOSTNAME:=${VSCODE_NAMESPACE}.acme.com}}
 export VSCODE_KEYRING_PASS=$(uuidgen)
-
+export VSCODE_PVC_SIZE=10Gi
 
 export VSCODE_OAUTH2_PROXY_PROVIDER=${VSCODE_OAUTH2_PROXY_PROVIDER:=${GITHUB_OAUTH2_PROXY_PROVIDER}}
 export VSCODE_OAUTH2_PROXY_CLIENT_ID=${VSCODE_OAUTH2_PROXY_CLIENT_ID:=${GITHUB_OAUTH2_PROXY_CLIENT_ID}}
@@ -30,6 +30,9 @@ export DIND_MEM_REQUEST=512Mi
 export DIND_CPU_MAX=4
 export DIND_MEM_MAX=4G
 export VSCODE_ENVSUBST_FILTER="${VSCODE_ENVSUBST_FILTER:-}"
+export VSCODE_INGRESS_AUTH_URL='https://$host/oauth2/auth'
+export VSCODE_INGRESS_AUTH_SIGNIN='https://$host/oauth2/start?rd=$escaped_request_uri'
+export VSCODE_CERT_CLUSTER_ISSUER='letsencrypt-prod'
 
 export NGINX_INGRESS_CLASS=$(kubectl get ingressclass -o json | jq -r '.items[]|select(.metadata.annotations."ingressclass.kubernetes.io/is-default-class" == "true")|.metadata.name')
 export DRY_RUN=${DRY_RUN:-}
@@ -139,6 +142,8 @@ else
 
 	cat <<EOF | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
 	$(cat kubernetes/multi-account/main.yaml)
+	---
+	$(kubectl create secret tls vscode-server-ingress-tls -n ${VSCODE_NAMESPACE} --key nginx/ssl/privkey.pem --cert nginx/ssl/cert.pem --dry-run=client -o yaml)
 	---
 	$(kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} --from-file=kubernetes/multi-account/template.yaml --dry-run=client -o yaml)
 EOF

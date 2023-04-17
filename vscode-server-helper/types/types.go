@@ -8,7 +8,6 @@ import (
 
 type ClientGenerator interface {
 	KubeClient() (kubernetes.Interface, error)
-	NameSpaceExists(namespace string) (bool, error)
-	CreateNameSpace(namespace string) error
-	CreateCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) error
+	CodeSpaceExists(userName string) (bool, error)
+	CreateCodeSpace(userName string, w http.ResponseWriter, req *http.Request) error
 }

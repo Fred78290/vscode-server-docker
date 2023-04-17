@@ -76,19 +76,19 @@ spec:
               name: docker-graph-run
           env:
             - name: VSCODE_KEYRING_PASS
-              value: ${VSCODE_KEYRING_PASS}
+              value: "${VSCODE_KEYRING_PASS}"
             - name: VSCODE_SERVER_DATA_DIR
-              value: /usr/share/vscode-server
+              value: "/usr/share/vscode-server"
           envFrom:
             - configMapRef:
                 name: ${ACCOUNT_NAMESPACE}
           resources:
             limits:
-              cpu: ${VSCODE_CPU_MAX}
-              memory: ${VSCODE_MEM_MAX}
+              cpu: "${VSCODE_CPU_MAX}"
+              memory: "${VSCODE_MEM_MAX}"
             requests:
-              cpu: ${VSCODE_CPU_REQUEST}
-              memory: ${VSCODE_MEM_REQUEST}
+              cpu: "${VSCODE_CPU_REQUEST}"
+              memory: "${VSCODE_MEM_REQUEST}"
       volumes:
         - name: docker-graph-run
           emptyDir: {}
@@ -113,7 +113,7 @@ spec:
   volumeMode: Filesystem
   resources:
     requests:
-      storage: 10Gi
+      storage: ${VSCODE_PVC_SIZE}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -157,25 +157,27 @@ metadata:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: ${ACCOUNT_NAMESPACE}-ingress
+  name: ${ACCOUNT_NAMESPACE}
   namespace: ${ACCOUNT_NAMESPACE}
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: HTTP
     nginx.ingress.kubernetes.io/secure-backends: "false"
-    nginx.ingress.kubernetes.io/auth-url: "https://$host/oauth2/auth"
-    nginx.ingress.kubernetes.io/auth-signin: "https://$host/oauth2/start?rd=$escaped_request_uri"
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+#    nginx.ingress.kubernetes.io/auth-url: "${VSCODE_INGRESS_AUTH_URL}"
+#    nginx.ingress.kubernetes.io/auth-signin: "${VSCODE_INGRESS_AUTH_SIGNIN}"
+#    cert-manager.io/cluster-issuer: "${VSCODE_CERT_CLUSTER_ISSUER}"
 spec:
   ingressClassName: ${NGINX_INGRESS_CLASS}
   tls:
     - hosts:
         - ${VSCODE_HOSTNAME}
-      secretName: ${VSCODE_NAMESPACE}/vscode-server-ingress-tls
+      secretName: vscode-server-ingress-tls
   rules:
     - host: ${VSCODE_HOSTNAME}
       http:
         paths:
-          - path: /${ACCOUNT_NAMESPACE}
+          - path: /${ACCOUNT_NAMESPACE}/(.*)
             pathType: Prefix
             backend:
               service:
@@ -186,3 +188,5 @@ spec:
 ${ACCOUNT_CONFIGMAP}
 ---
 ${ACCOUNT_SECRET}
+---
+${INGRESS_SECRET_TLS}

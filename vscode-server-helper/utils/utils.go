@@ -2,6 +2,8 @@ package utils
 
 import (
 	"encoding/json"
+	"os"
+	"syscall"
 	"time"
 
 	"github.com/Fred78290/vscode-server-helper/context"
@@ -41,4 +43,25 @@ func PollImmediate(interval, timeout time.Duration, condition wait.ConditionFunc
 	} else {
 		return wait.PollImmediate(interval, timeout, condition)
 	}
+}
+
+func FileExistAndReadable(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+
+	if entry, err := os.Stat(name); err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+	} else {
+		fm := entry.Mode()
+		sys := entry.Sys().(*syscall.Stat_t)
+
+		if (fm&(1<<2) != 0) || ((fm&(1<<5)) != 0 && os.Getegid() == int(sys.Gid)) || ((fm&(1<<8)) != 0 && (os.Geteuid() == int(sys.Uid))) {
+			return true
+		}
+	}
+
+	return false
 }

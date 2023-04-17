@@ -126,9 +126,9 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: HTTP
     nginx.ingress.kubernetes.io/secure-backends: "false"
-    nginx.ingress.kubernetes.io/auth-url: "https://$host/oauth2/auth"
-    nginx.ingress.kubernetes.io/auth-signin: "https://$host/oauth2/start?rd=$escaped_request_uri"
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/auth-url: "${VSCODE_INGRESS_AUTH_URL}"
+    nginx.ingress.kubernetes.io/auth-signin: "${VSCODE_INGRESS_AUTH_SIGNIN}"
+    cert-manager.io/cluster-issuer: "${VSCODE_CERT_CLUSTER_ISSUER}"
 spec:
   ingressClassName: ${NGINX_INGRESS_CLASS}
   tls:
