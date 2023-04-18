@@ -161,9 +161,29 @@ metadata:
   namespace: ${ACCOUNT_NAMESPACE}
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: HTTP
-    nginx.ingress.kubernetes.io/secure-backends: "false"
     nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /$1
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      rewrite ^/(stable.*|insiders.*|static.*|callback.*|web-extension-resource.*) /${ACCOUNT_NAMESPACE}$uri break;
+
+      auth_request_set $user   $upstream_http_x_auth_request_user;
+      auth_request_set $email  $upstream_http_x_auth_request_email;
+      auth_request_set $token  $upstream_http_x_auth_request_access_token;
+      proxy_set_header X-User  $user;
+      proxy_set_header X-Email $email;
+      proxy_set_header X-Access-Token $token;
+      proxy_set_header Accept-Encoding "";
+      proxy_set_header X-Forwarded-Prefix ${ACCOUNT_NAMESPACE};
+      proxy_set_header X-Forwarded-Uri $request_uri;
+      sub_filter_types text/html text/html;
+      sub_filter_once off;
+      sub_filter 'href="/' 'href="/${ACCOUNT_NAMESPACE}/';
+      sub_filter 'src="/' 'src="/${ACCOUNT_NAMESPACE}/';
+      sub_filter 'href=\'/' 'href=\'/${ACCOUNT_NAMESPACE}/';
+      sub_filter 'src=\'/' 'src=\'/${ACCOUNT_NAMESPACE}/';
+#    external-dns.alpha.kubernetes.io/hostname: ${ACCOUNT_HOSTNAME}
+#    external-dns.alpha.kubernetes.io/target: ${VSCODE_HOSTNAME}
+#    external-dns.alpha.kubernetes.io/ttl: '600'
 #    nginx.ingress.kubernetes.io/auth-url: "${VSCODE_INGRESS_AUTH_URL}"
 #    nginx.ingress.kubernetes.io/auth-signin: "${VSCODE_INGRESS_AUTH_SIGNIN}"
 #    cert-manager.io/cluster-issuer: "${VSCODE_CERT_CLUSTER_ISSUER}"
