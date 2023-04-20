@@ -27,7 +27,9 @@ func serve(cfg *types.Config) error {
 		if user, found := req.Header["X-User"]; found {
 			generator.CreateCodeSpace(strings.ToLower(user[0]), w, req)
 		} else {
-			req.Response.StatusCode = 401
+			glog.Errorf("X-User not found")
+
+			req.Response.StatusCode = http.StatusPreconditionRequired
 
 			w.Header().Set("Content-Type", "text/plain")
 

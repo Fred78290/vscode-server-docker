@@ -12,10 +12,12 @@ metadata:
   namespace: ${VSCODE_NAMESPACE}
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: HTTP
-    nginx.ingress.kubernetes.io/secure-backends: "false"
-    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: ${NGINX_INGRESS_CLASS}
+  tls:
+    - hosts:
+        - ${VSCODE_HOSTNAME}
+      secretName: vscode-server-ingress-tls
   rules:
     - host: ${VSCODE_HOSTNAME}
       http:
@@ -27,22 +29,6 @@ spec:
                 name: oauth2-proxy
                 port:
                   number: 4180
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app.kubernetes.io/name: vscode-server-helper
-  name: vscode-server-helper
-  namespace: ${VSCODE_NAMESPACE}
-spec:
-  ports:
-    - name: http
-      port: 4180
-      protocol: TCP
-      targetPort: 4180
-  selector:
-    app.kubernetes.io/name: vscode-server-helper
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -118,11 +104,11 @@ metadata:
           proxy_set_header Connection "upgrade";
           proxy_set_header X-Real-IP $remote_addr;
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          proxy_set_header X-Auth-Request-Redirect $scheme://$host:$LISTEN_PORT$request_uri;
+          proxy_set_header X-Auth-Request-Redirect $scheme://$host$request_uri;
 
           auth_request /oauth2/auth;
-          error_page 401 = /oauth2/start?rd=https://$host:$LISTEN_PORT$request_uri;
- 
+          error_page 401 = ${VSCODE_INGRESS_AUTH_SIGNIN};
+
           auth_request_set $user   $upstream_http_x_auth_request_user;
           auth_request_set $email  $upstream_http_x_auth_request_email;
           auth_request_set $token  $upstream_http_x_auth_request_access_token;
@@ -130,7 +116,7 @@ metadata:
           proxy_set_header X-Email $email;
           proxy_set_header X-Access-Token $token;
 
-          rewrite $uri $scheme://$host:$LISTEN_PORT/$user$uri;
+          rewrite $uri /$user$uri;
       }
     nginx.ingress.kubernetes.io/configuration-snippet: |
       auth_request_set $user   $upstream_http_x_auth_request_user;
@@ -141,6 +127,10 @@ metadata:
       proxy_set_header X-Access-Token $token;
 spec:
   ingressClassName: ${NGINX_INGRESS_CLASS}
+  tls:
+    - hosts:
+        - ${VSCODE_HOSTNAME}
+      secretName: vscode-server-ingress-tls
   rules:
     - host: ${VSCODE_HOSTNAME}
       http:
@@ -161,7 +151,38 @@ metadata:
   name: vscode-server-helper
   namespace: ${VSCODE_NAMESPACE}
 spec:
-  type: ExternalName
-  externalName: vscode-server-helper.aldunelabs.private
   ports:
-    - port: 8000
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+      name: vscode-server-helper
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  namespace: ${VSCODE_NAMESPACE}
+  name: vscode-server-helper # by convention, use the name of the service as a prefix for the name of the EndpointSlice
+  labels:
+    # You should set the "kubernetes.io/service-name" label. Set its value to match the name of the service
+    kubernetes.io/service-name: vscode-server-helper
+addressType: IPv4
+ports:
+  - name: vscode-server-helper
+    appProtocol: http
+    protocol: TCP
+    port: 8000
+endpoints:
+  - addresses:
+      - "${EXTERNAL_IP}" # the IP addresses in this list can appear in any order
+---
+kind: Endpoints
+apiVersion: v1
+metadata:
+  namespace: ${VSCODE_NAMESPACE}
+  name: vscode-server-helper
+subsets:
+  - addresses:
+      - ip: "${EXTERNAL_IP}"
+    ports:
+      - port: 8000
+        name: vscode-server-helper

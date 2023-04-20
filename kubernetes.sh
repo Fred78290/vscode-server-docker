@@ -1,15 +1,7 @@
 #!/bin/bash
 set -o pipefail -o nounset
 
-: "${VSCODE_SERVER_REGISTRY:?Variable not set or empty}"
-
 if [ "$(uname -s)" == "Darwin" ]; then
-
-    if [ -z "$(command -v cfssl)" ]; then
-        echo_red_bold "You must install gnu cfssl with brew (brew install cfssl)"
-        exit 1
-    fi
-
     if [ -z "$(command -v gsed)" ]; then
         echo_red_bold "You must install gnu sed with brew (brew install gsed), this script is not compatible with the native macos sed"
         exit 1
@@ -30,9 +22,17 @@ if [ "$(uname -s)" == "Darwin" ]; then
     alias base64=gbase64
     alias sed=gsed
     alias getopt=/usr/local/opt/gnu-getopt/bin/getopt
+
+	export NET_IF=$(route get 1 | grep -m 1 interface | awk '{print $2}')
+	export EXTERNAL_IP=$(ifconfig ${NET_IF} | grep -m 1 "inet\s" | sed -n 1p | awk '{print $2}')
+else
+	export NET_IF=$(ip route get 1 | awk '{print $5;exit}')
+	export EXTERNAL_IP=$(ip addr show ${NET_IF} | grep -m 1 "inet\s" | tr '/' ' ' | awk '{print $2}')
 fi
 
-export VSCODE_ACCOUNT_TYPE=single
+: "${VSCODE_SERVER_REGISTRY:?Variable not set or empty}"
+
+export VSCODE_ACCOUNT_TYPE=multi
 export VSCODE_SERVER_REGISTRY=${DEV_VSCODE_SERVER_REGISTRY:=${VSCODE_SERVER_REGISTRY}}
 export VSCODE_SERVER_IMAGE=${VSCODE_SERVER_IMAGE:=${VSCODE_SERVER_REGISTRY}/vscode-server:v0.1.0}
 export VSCODE_SERVER_HELPER_IMAGE=${VSCODE_SERVER_HELPER_IMAGE:=${VSCODE_SERVER_REGISTRY}/vscode-server-helper:v0.1.0}
@@ -44,11 +44,16 @@ export VSCODE_HOSTNAME=${DEV_VSCODE_HOSTNAME:=${VSCODE_HOSTNAME:=${VSCODE_NAMESP
 export VSCODE_KEYRING_PASS=$(uuidgen)
 export VSCODE_PVC_SIZE=10Gi
 
-export VSCODE_OAUTH2_PROXY_PROVIDER=${VSCODE_OAUTH2_PROXY_PROVIDER:=${GITHUB_OAUTH2_PROXY_PROVIDER}}
-export VSCODE_OAUTH2_PROXY_CLIENT_ID=${VSCODE_OAUTH2_PROXY_CLIENT_ID:=${GITHUB_OAUTH2_PROXY_CLIENT_ID}}
-export VSCODE_OAUTH2_PROXY_CLIENT_SECRET=${VSCODE_OAUTH2_PROXY_CLIENT_SECRET:=${GITHUB_OAUTH2_PROXY_CLIENT_SECRET}}
-export VSCODE_OAUTH2_PROXY_SCOPE=${VSCODE_OAUTH2_PROXY_SCOPE:=${GITHUB_OAUTH2_PROXY_SCOPE}}	
+export VSCODE_OAUTH2_PROXY_PROVIDER=${VSCODE_OAUTH2_PROXY_PROVIDER:=${GITHUB_DEBUG_OAUTH2_PROXY_PROVIDER}}
+export VSCODE_OAUTH2_PROXY_CLIENT_ID=${VSCODE_OAUTH2_PROXY_CLIENT_ID:=${GITHUB_DEBUG_OAUTH2_PROXY_CLIENT_ID}}
+export VSCODE_OAUTH2_PROXY_CLIENT_SECRET=${VSCODE_OAUTH2_PROXY_CLIENT_SECRET:=${GITHUB_DEBUG_OAUTH2_PROXY_CLIENT_SECRET}}
+export VSCODE_OAUTH2_PROXY_SCOPE=${VSCODE_OAUTH2_PROXY_SCOPE:=${GITHUB_DEBUG_OAUTH2_PROXY_SCOPE}}	
 export VSCODE_OAUTH2_PROXY_COOKIE_SECRET=$(dd if=/dev/urandom bs=32 count=1 2>/dev/null | base64 | tr -d -- '\n' | tr -- '+/' '-_'; echo)
+
+export VSCODE_OAUTH2_PROXY_PROVIDER=${GOOGLE_OAUTH2_PROXY_PROVIDER}
+export VSCODE_OAUTH2_PROXY_CLIENT_ID=${GOOGLE_OAUTH2_PROXY_CLIENT_ID}
+export VSCODE_OAUTH2_PROXY_CLIENT_SECRET=${GOOGLE_OAUTH2_PROXY_CLIENT_SECRET}
+export VSCODE_OAUTH2_PROXY_SCOPE=${GOOGLE_OAUTH2_PROXY_SCOPE}
 
 export VSCODE_CPU_REQUEST=500m
 export VSCODE_MEM_REQUEST=512Mi
@@ -62,9 +67,14 @@ export VSCODE_ENVSUBST_FILTER="${VSCODE_ENVSUBST_FILTER:-}"
 export VSCODE_INGRESS_AUTH_URL='https://$host/oauth2/auth'
 export VSCODE_INGRESS_AUTH_SIGNIN='https://$host/oauth2/start?rd=$escaped_request_uri'
 export VSCODE_CERT_CLUSTER_ISSUER='letsencrypt-prod'
+export VSCODE_MODE=dev
+export VSCODE_TLS_KEY=nginx/ssl/privkey.pem
+export VSCODE_TLS_CERT=nginx/ssl/cert.pem
 
 export NGINX_INGRESS_CLASS=$(kubectl get ingressclass -o json | jq -r '.items[]|select(.metadata.annotations."ingressclass.kubernetes.io/is-default-class" == "true")|.metadata.name')
 export DRY_RUN=${DRY_RUN:-}
+
+NGINX_INGRESS_CLASS=${NGINX_INGRESS_CLASS:=nginx}
 
 function url_encode() {
     echo "$@" \
@@ -206,11 +216,11 @@ while true; do
 		;;
 
 	--tls-key)
-		TLS_KEY=$2
+		VSCODE_TLS_KEY=$2
 		shift 2
 		;;
 	--tls-cert)
-		TLS_CERT=$2
+		VSCODE_TLS_CERT=$2
 		shift 2
 		;;
 
@@ -229,75 +239,96 @@ while true; do
     esac
 done
 
+VSCODE_SERVER_REDIRECT=$(url_encode "https://${VSCODE_HOSTNAME}/create-space")
+
+: "${VSCODE_MODE:?Variable not set or empty}"
+: "${VSCODE_HOSTNAME:?Variable not set or empty}"
+: "${VSCODE_NAMESPACE:?Variable not set or empty}"
+: "${VSCODE_ACCOUNT_TYPE:?Variable not set or empty}"
+: "${VSCODE_OAUTH2_PROXY_PROVIDER:?Variable not set or empty}"
+: "${VSCODE_OAUTH2_PROXY_CLIENT_ID:?Variable not set or empty}"
+: "${VSCODE_OAUTH2_PROXY_CLIENT_SECRET:?Variable not set or empty}"
+: "${VSCODE_OAUTH2_PROXY_SCOPE:?Variable not set or empty}"
+
+: "${VSCODE_INGRESS_AUTH_URL:?Variable not set or empty}"
+: "${VSCODE_INGRESS_AUTH_SIGNIN:?Variable not set or empty}"
+
+: "${VSCODE_CPU_REQUEST:?Variable not set or empty}"
+: "${VSCODE_CPU_MAX:?Variable not set or empty}"
+: "${VSCODE_MEM_REQUEST:?Variable not set or empty}"
+: "${VSCODE_MEM_MAX:?Variable not set or empty}"
+: "${VSCODE_PVC_SIZE:?Variable not set or empty}"
+
+: "${VSCODE_SERVER_IMAGE:?Variable not set or empty}"
+: "${VSCODE_SERVER_HELPER_IMAGE:?Variable not set or empty}"
+
+if [ -z "${VSCODE_TLS_KEY}" ] && [ -z "${VSCODE_TLS_CERT}" ]; then
+	VSCODE_INGRESS_AUTH_URL=$(echo -n ${VSCODE_INGRESS_AUTH_URL} | sed -e 's/https/http/')
+	VSCODE_INGRESS_AUTH_SIGNIN=$(echo -n {VSCODE_INGRESS_AUTH_SIGNIN}  | sed -e 's/https/http/')
+fi
+
+DEFINED_ENVS=$(printf '${%s} ' $(awk "END { for (name in ENVIRON) { print ( name ~ /${VSCODE_ENVSUBST_FILTER}/ ) ? name : \"\" } }" < /dev/null ))
+
+touch auth
+
 if [ ${VSCODE_ACCOUNT_TYPE} == "single" ]; then
-
 	if [ "${VSCODE_AUTH_TYPE}" == basic ]; then
-		read    -p "Enter your vscode username (${VSCODE_USER}): " WANTED_VSCODE_USER
-		read -s -p "Enter your vscode password (${VSCODE_PASSWORD}): " WANTED_VSCODE_PASSWORD ; echo
-
-		VSCODE_USER=${WANTED_VSCODE_USER:=${VSCODE_USER}}
-		VSCODE_PASSWORD=${WANTED_VSCODE_PASSWORD:=${VSCODE_PASSWORD}}
-
+		: "${VSCODE_USER:?Variable not set or empty}"
+		: "${VSCODE_PASSWORD:?Variable not set or empty}"
+		
 		echo "${VSCODE_PASSWORD}" | htpasswd -i -c auth ${VSCODE_USER}
-
-		DEFINED_ENVS=$(printf '${%s} ' $(awk "END { for (name in ENVIRON) { print ( name ~ /${VSCODE_ENVSUBST_FILTER}/ ) ? name : \"\" } }" < /dev/null ))
-
-	cat <<EOF | envsubst "$DEFINED_ENVS" | tee kubernetes/single-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
-	$(cat kubernetes/single-account/basic.yaml)
-	---
-	$(kubectl create secret generic basic-auth -n ${VSCODE_NAMESPACE} --from-file=auth --from-literal=VSCODE_USER=${VSCODE_USER} --from-literal=VSCODE_PASSWORD=${VSCODE_PASSWORD} --dry-run=client -o yaml)
-EOF
-
+	
+		MAIN_TEMPLATE=kubernetes/single-account/basic.yaml
 	elif [ "${VSCODE_AUTH_TYPE}" == oauth2 ]; then
-		while [ -z "${VSCODE_OAUTH2_PROXY_CLIENT_ID}" ] || [ -z "${VSCODE_OAUTH2_PROXY_CLIENT_SECRET}" ] || [ -z "${VSCODE_OAUTH2_PROXY_PROVIDER}" ];
-		do
-			read -p "Enter your oauth2 provider (${VSCODE_OAUTH2_PROXY_PROVIDER}): " WANTED_VSCODE_OAUTH2_PROXY_PROVIDER
-			read -p "Enter your oauth2 client id (${VSCODE_OAUTH2_PROXY_CLIENT_ID}): " WANTED_OAUTH2_PROXY_CLIENT_ID
-			read -p "Enter your oauth2 client secret (${VSCODE_OAUTH2_PROXY_CLIENT_SECRET}): " WANTED_OAUTH2_PROXY_CLIENT_SECRET
-
-			VSCODE_OAUTH2_PROXY_PROVIDER=${WANTED_VSCODE_OAUTH2_PROXY_PROVIDER:=${VSCODE_OAUTH2_PROXY_PROVIDER}}
-			VSCODE_OAUTH2_PROXY_CLIENT_ID=${WANTED_OAUTH2_PROXY_CLIENT_ID:=${VSCODE_OAUTH2_PROXY_CLIENT_ID}}
-			VSCODE_OAUTH2_PROXY_CLIENT_SECRET=${WANTED_OAUTH2_PROXY_CLIENT_SECRET:=${VSCODE_OAUTH2_PROXY_CLIENT_SECRET}}
-		done
-
-		DEFINED_ENVS=$(printf '${%s} ' $(awk "END { for (name in ENVIRON) { print ( name ~ /${VSCODE_ENVSUBST_FILTER}/ ) ? name : \"\" } }" < /dev/null ))
-
-		cat kubernetes/single-account/oauth.yaml | envsubst "$DEFINED_ENVS" | tee kubernetes/single-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
+		MAIN_TEMPLATE=kubernetes/single-account/oauth.yaml
 	elif [ "${VSCODE_AUTH_TYPE}" == none ]; then
-		DEFINED_ENVS=$(printf '${%s} ' $(awk "END { for (name in ENVIRON) { print ( name ~ /${VSCODE_ENVSUBST_FILTER}/ ) ? name : \"\" } }" < /dev/null ))
-
-		cat kubernetes/single-account/none.yaml | envsubst "$DEFINED_ENVS" | tee kubernetes/single-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
+		MAIN_TEMPLATE=kubernetes/single-account/none.yaml
 	else
 		echo "Authentification mode: ${VSCODE_AUTH_TYPE}, not supported"
 		exit 1
 	fi
-else
-	VSCODE_SERVER_REDIRECT=$(url_encode "https://${VSCODE_HOSTNAME}/create-space")
 
-	DEFINED_ENVS=$(printf '${%s} ' $(awk "END { for (name in ENVIRON) { print ( name ~ /${VSCODE_ENVSUBST_FILTER}/ ) ? name : \"\" } }" < /dev/null ))
-
-	if [ ${VSCODE_MODE} == "dev" ]; then
+	if [ -n "${VSCODE_TLS_KEY}" ] && [ -n "${VSCODE_TLS_CERT}" ]; then
 		cat <<EOF | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
-		$(cat kubernetes/multi-account/dev.yaml)
-		---
-		$(kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} --from-file=kubernetes/multi-account/template.yaml --dry-run=client -o yaml)
-EOF
-	else if [ -n "${TLS_KEY}" ] && [ -n "${TLS_CERT}" ]; then
-		cat <<EOF | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
-		$(cat kubernetes/multi-account/main.yaml)
-		---
-		$(kubectl create secret tls vscode-server-ingress-tls -n ${VSCODE_NAMESPACE} --key nginx/ssl/privkey.pem --cert nginx/ssl/cert.pem --dry-run=client -o yaml)
-		---
-		$(kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} --from-file=kubernetes/multi-account/template.yaml --dry-run=client -o yaml)
+$(cat ${MAIN_TEMPLATE})
+---
+$(kubectl create secret tls vscode-server-ingress-tls -n ${VSCODE_NAMESPACE} --key ${VSCODE_TLS_KEY} --cert ${VSCODE_TLS_CERT} --dry-run=client -o yaml)
+---
+$(kubectl create secret generic basic-auth -n ${VSCODE_NAMESPACE} --from-file=auth --from-literal=VSCODE_USER=${VSCODE_USER} --from-literal=VSCODE_PASSWORD=${VSCODE_PASSWORD} --dry-run=client -o yaml)
 EOF
 	else
 		cat <<EOF | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
-		$(cat kubernetes/multi-account/main.yaml)
-		---
-		$(kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} --from-file=kubernetes/multi-account/template.yaml --dry-run=client -o yaml)
+$(cat ${MAIN_TEMPLATE})
+---
+$(kubectl create secret generic basic-auth -n ${VSCODE_NAMESPACE} --from-file=auth --from-literal=VSCODE_USER=${VSCODE_USER} --from-literal=VSCODE_PASSWORD=${VSCODE_PASSWORD} --dry-run=client -o yaml)
 EOF
+	fi
+else
+
+	if [ ${VSCODE_MODE} == "dev" ]; then
+		MAIN_TEMPLATE=kubernetes/multi-account/dev.yaml
+	else
+		MAIN_TEMPLATE=kubernetes/multi-account/main.yaml
+	fi
+
+	if [ -n "${VSCODE_TLS_KEY}" ] && [ -n "${VSCODE_TLS_CERT}" ]; then
+
+		cat <<EOF | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
+$(cat ${MAIN_TEMPLATE})
+---
+$(kubectl create secret tls vscode-server-ingress-tls -n ${VSCODE_NAMESPACE} --key ${VSCODE_TLS_KEY} --cert ${VSCODE_TLS_CERT} --dry-run=client -o yaml)
+---
+$(kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} --from-file=kubernetes/multi-account/template.yaml --dry-run=client -o yaml)
+EOF
+
+	else
+
+		cat <<EOF | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
+$(cat ${MAIN_TEMPLATE})
+---
+$(kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} --from-file=kubernetes/multi-account/template.yaml --dry-run=client -o yaml)
+EOF
+
 	fi
 
 fi
-
-TLS_KEY=

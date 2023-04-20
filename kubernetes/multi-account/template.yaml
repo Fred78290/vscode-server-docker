@@ -6,12 +6,18 @@ metadata:
     app.kubernetes.io/name: ${ACCOUNT_NAMESPACE}
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: ${ACCOUNT_NAMESPACE}
+  name: vscode-server
+---
+apiVersion: v1
 kind: Service
 metadata:
-  name: ${ACCOUNT_NAMESPACE}
+  name: vscode-server
   namespace: ${ACCOUNT_NAMESPACE}
   labels:
-    app.kubernetes.io/name: ${ACCOUNT_NAMESPACE}
+    app.kubernetes.io/name: vscode-server
 spec:
   type: ClusterIP
   ports:
@@ -20,25 +26,25 @@ spec:
       port: 8000
       targetPort: http
   selector:
-    app.kubernetes.io/name: ${ACCOUNT_NAMESPACE}
+    app.kubernetes.io/name: vscode-server
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${ACCOUNT_NAMESPACE}
+  name: vscode-server
   namespace: ${ACCOUNT_NAMESPACE}
 spec:
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: ${ACCOUNT_NAMESPACE}
+      app.kubernetes.io/name: vscode-server
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: ${ACCOUNT_NAMESPACE}
+        app.kubernetes.io/name: vscode-server
     spec:
-      serviceAccountName: ${ACCOUNT_NAMESPACE}
+      serviceAccountName: vscode-server
       containers:
         - name: dind-daemon
           image: docker:dind
@@ -53,13 +59,15 @@ spec:
               cpu: ${DIND_CPU_REQUEST}
               memory: ${DIND_MEM_REQUEST}
           volumeMounts:
-            - name: docker-graph-storage
+            - name: vscode-server-volume
               mountPath: /var/lib/docker
-            - name: docker-graph-certs
-              mountPath: /certs
+              subPath: vscode-server-docker
             - name: docker-graph-run
               mountPath: /var/run
-        - name: ${ACCOUNT_NAMESPACE}
+            - name: vscode-server-volume
+              mountPath: /certs
+              subPath: vscode-server-cert
+        - name: vscode-server
           image: ${VSCODE_SERVER_IMAGE}
           imagePullPolicy: Always
           ports:
@@ -67,11 +75,14 @@ spec:
               name: http
           volumeMounts:
             - mountPath: /usr/share/vscode-server
-              name: vscode-server-data
-            - mountPath: /home/vscode-server/sources
-              name: vscode-server-sources
+              name: vscode-server-volume
+              subPath: vscode-server-data
+            - mountPath: /home/vscode-server
+              name: vscode-server-volume
+              subPath: vscode-server-home
             - mountPath: /certs
-              name: docker-graph-certs
+              name: vscode-server-volume
+              subPath: vscode-server-cert
             - mountPath: /var/run
               name: docker-graph-run
           env:
@@ -92,21 +103,15 @@ spec:
       volumes:
         - name: docker-graph-run
           emptyDir: {}
-        - name: docker-graph-certs
-          emptyDir: {}
-        - name: docker-graph-storage
-          emptyDir: {}
-        - name: vscode-server-data
-          emptyDir: {}
-        - name: vscode-server-sources
+        - name: vscode-server-volume
           persistentVolumeClaim:
-            claimName: ${ACCOUNT_NAMESPACE}
+            claimName: pvc-vscode-server-${ACCOUNT_NAMESPACE}
 ---
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
   namespace: ${ACCOUNT_NAMESPACE}
-  name: ${ACCOUNT_NAMESPACE}
+  name: pvc-vscode-server-${ACCOUNT_NAMESPACE}
 spec:
   accessModes:
     - ReadWriteOnce
@@ -119,8 +124,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   labels:
-    app.kubernetes.io/name: ${ACCOUNT_NAMESPACE}
-  name: ${ACCOUNT_NAMESPACE}
+    app.kubernetes.io/name: vscode-server
+  name: vscode-server
   namespace: ${ACCOUNT_NAMESPACE}
 rules:
   - apiGroups:
@@ -136,35 +141,29 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   labels:
-    app.kubernetes.io/name: ${ACCOUNT_NAMESPACE}
-  name: ${ACCOUNT_NAMESPACE}
+    app.kubernetes.io/name: vscode-server
+  name: vscode-server
   namespace: ${ACCOUNT_NAMESPACE}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: ingress-nginx
+  name: vscode-server
 subjects:
   - kind: ServiceAccount
-    name: ${ACCOUNT_NAMESPACE}
+    name: vscode-server
     namespace: ${ACCOUNT_NAMESPACE}
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  namespace: ${ACCOUNT_NAMESPACE}
-  name: ${ACCOUNT_NAMESPACE}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: ${ACCOUNT_NAMESPACE}
+  name: ingress-vscode-server-${ACCOUNT_NAMESPACE}
   namespace: ${ACCOUNT_NAMESPACE}
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: HTTP
     nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /$1
     nginx.ingress.kubernetes.io/configuration-snippet: |
-      rewrite ^/(stable.*|insiders.*|static.*|callback.*|web-extension-resource.*) /${ACCOUNT_NAMESPACE}$uri break;
+      rewrite ^/stable|insiders|static|callback|web-extension-resource /${ACCOUNT_NAMESPACE}$uri break;
 
       auth_request_set $user   $upstream_http_x_auth_request_user;
       auth_request_set $email  $upstream_http_x_auth_request_email;
@@ -201,7 +200,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: ${ACCOUNT_NAMESPACE}
+                name: vscode-server
                 port:
                   number: 8000
 ---
