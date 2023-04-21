@@ -71,12 +71,15 @@ export VSCODE_MODE=dev
 export VSCODE_TLS_KEY=nginx/ssl/privkey.pem
 export VSCODE_TLS_CERT=nginx/ssl/cert.pem
 
-export NGINX_INGRESS_CLASS=$(kubectl get ingressclass -o json | jq -r '.items[]|select(.metadata.annotations."ingressclass.kubernetes.io/is-default-class" == "true")|.metadata.name')
+export DEFAULT_NGINX_INGRESS_CLASS=$(kubectl get ingressclass -o json | jq -r '.items[]|select(.metadata.annotations."ingressclass.kubernetes.io/is-default-class" == "true")|.metadata.name')
+export DEFAULT_STORAGE_CLASS=$(kubectl get storageclass -o json | jq -r '.items[]|select(.metadata.annotations."storageclass.kubernetes.io/is-default-class" == "true")|.metadata.name')
+
 export DRY_RUN=${DRY_RUN:-}
 export USE_CERT_MANANGER=NO
 export USE_EXTERNAL_DNS=NO
 
-NGINX_INGRESS_CLASS=${NGINX_INGRESS_CLASS:=nginx}
+: NGINX_INGRESS_CLASS=${NGINX_INGRESS_CLASS:=${DEFAULT_NGINX_INGRESS_CLASS:?Any ingress class defined}}
+: STORAGE_CLASS=${STORAGE_CLASS:=${DEFAULT_STORAGE_CLASS:?Any storage class defined}}
 
 function url_encode() {
     echo "$@" \
@@ -292,13 +295,7 @@ fi
 
 DEFINED_ENVS=$(printf '${%s} ' $(awk "END { for (name in ENVIRON) { print ( name ~ /${VSCODE_ENVSUBST_FILTER}/ ) ? name : \"\" } }" < /dev/null ))
 
-if [ "$(kubectl get ns rediss -o json 2>/dev/null| jq -r '.status.phase/""')" != "Active" ]; then
-	kubernetes/redis/redis.sh
-fi
-
 touch auth
-
-MASTER_REDIS_PASSWORD=$(kubectl get  cm redis-env -n redis -o json | jq -r '.data.MASTER_REDIS_PASSWORD')
 
 if [ ${VSCODE_ACCOUNT_TYPE} == "single" ]; then
 	if [ "${VSCODE_AUTH_TYPE}" == basic ]; then
@@ -330,18 +327,6 @@ cat ${MAIN_TEMPLATE} > /tmp/deployed.yml
 if [[ "${VSCODE_AUTH_TYPE}" == oauth2 || "${VSCODE_ACCOUNT_TYPE}" == "multi" ]]; then
 	echo "---" >> /tmp/deployed.yml
 	cat kubernetes/oauth2-proxy/oauth2-proxy.yaml >> /tmp/deployed.yml
-
-	echo "---" >> /tmp/deployed.yml
-	kubectl create secret generic redis-tls -n ${VSCODE_NAMESPACE} \
-		--from-file=kubernetes/redis/tls/ca.crt \
-		--from-file=kubernetes/redis/tls/redis.key \
-		--from-file=kubernetes/redis/tls/redis.crt \
-		--dry-run=client -o yaml >> /tmp/deployed.yml
-
-	echo "---" >> /tmp/deployed.yml
-	kubectl create configmap redis-env -n ${VSCODE_NAMESPACE} \
-		--from-literal=MASTER_REDIS_PASSWORD=${MASTER_REDIS_PASSWORD} \
-		--dry-run=client -o yaml >> /tmp/deployed.yml
 fi
 
 if [[ -n "${VSCODE_TLS_KEY}" && -n "${VSCODE_TLS_CERT}" ]]; then
@@ -362,6 +347,25 @@ if [ "${VSCODE_AUTH_TYPE}" == basic ]; then
 fi
 
 if [ "${VSCODE_ACCOUNT_TYPE}" == "multi" ]; then
+	echo "---" >> /tmp/deployed.yml
+	kubectl create cm vscode-server-env -n ${VSCODE_NAMESPACE} \
+		--from-literal=DIND_CPU_MAX=${DIND_CPU_MAX} \
+		--from-literal=DIND_CPU_REQUEST=${DIND_CPU_REQUEST} \
+		--from-literal=DIND_MEM_MAX=${DIND_MEM_MAX} \
+		--from-literal=DIND_MEM_REQUEST=${DIND_MEM_REQUEST} \
+		--from-literal=NGINX_INGRESS_CLASS=${NGINX_INGRESS_CLASS} \
+		--from-literal=STORAGE_CLASS=${STORAGE_CLASS} \
+		--from-literal=VSCODE_SERVER_IMAGE=${VSCODE_SERVER_IMAGE} \
+		--from-literal=VSCODE_HOSTNAME=${VSCODE_HOSTNAME} \
+		--from-literal=VSCODE_PVC_SIZE=${VSCODE_PVC_SIZE} \
+		--from-literal=VSCODE_CPU_MAX=${VSCODE_CPU_MAX} \
+		--from-literal=VSCODE_CPU_REQUEST=${VSCODE_CPU_REQUEST} \
+		--from-literal=VSCODE_MEM_MAX=${VSCODE_MEM_MAX} \
+		--from-literal=VSCODE_MEM_REQUEST=${VSCODE_MEM_REQUEST} \
+		--from-literal=VSCODE_KEYRING_PASS=${VSCODE_KEYRING_PASS} \
+		--from-literal=VSCODE_SERVER_DATA_DIR=/usr/share/vscode-server \
+		--dry-run=client -o yaml >> /tmp/deployed.yml
+
 	echo "---" >> /tmp/deployed.yml
 	kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} --from-file=kubernetes/multi-account/template.yaml --dry-run=client -o yaml >> /tmp/deployed.yml
 fi
