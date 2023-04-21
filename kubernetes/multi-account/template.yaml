@@ -116,6 +116,7 @@ spec:
   accessModes:
     - ReadWriteOnce
   volumeMode: Filesystem
+  storageClassName: ${STORAGE_CLASS}
   resources:
     requests:
       storage: ${VSCODE_PVC_SIZE}

@@ -45,7 +45,27 @@ spec:
         app.kubernetes.io/name: oauth2-proxy
     spec:
       containers:
-        - args:
+        -
+          name: redis
+          image: redis:6-alpine3.17
+          ports:
+            - containerPort: 6379
+              name: redis
+          volumeMounts:
+            - name: pvc-oauth2-proxy
+              mountPath: /data
+          resources:
+            limits:
+              cpu: 500m
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 200Mi
+        -
+          image: quay.io/oauth2-proxy/oauth2-proxy:latest
+          imagePullPolicy: Always
+          name: oauth2-proxy
+          args:
             - --provider=${VSCODE_OAUTH2_PROXY_PROVIDER}
             - --client-id=${VSCODE_OAUTH2_PROXY_CLIENT_ID}
             - --client-secret=${VSCODE_OAUTH2_PROXY_CLIENT_SECRET}
@@ -54,13 +74,8 @@ spec:
             - --email-domain=*
             - --upstream=file:///dev/null
             - --http-address=0.0.0.0:4180
-            - --redis-insecure-skip-tls-verify=true
-            - --redis-ca-path=/usr/local/etc/redis/tls/ca.crt
-            - --redis-password=${MASTER_REDIS_PASSWORD}
             - --session-store-type=redis
-            - --redis-cluster-connection-urls=rediss://redis.redis.svc.cluster.local:6379
-            - --redis-sentinel-master-name=redis-0
-            - --redis-use-cluster=true
+            - --redis-connection-url=redis://127.0.0.1:6379
           resources:
             limits:
               cpu: 200m
@@ -68,22 +83,27 @@ spec:
             requests:
               cpu: 50m
               memory: 20Mi
-          image: quay.io/oauth2-proxy/oauth2-proxy:latest
-          imagePullPolicy: Always
-          name: oauth2-proxy
           ports:
             - containerPort: 4180
               protocol: TCP
-          volumeMounts:
-            - name: redis-tls
-              mountPath: /usr/local/etc/redis/tls
-          envFrom:
-            - configMapRef:
-                name: redis-env
       volumes:
-        - name: redis-tls
-          secret:
-            secretName: redis-tls
+        - name: pvc-oauth2-proxy
+          persistentVolumeClaim:
+            claimName: pvc-oauth2-proxy
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  namespace: ${VSCODE_NAMESPACE}
+  name: pvc-oauth2-proxy
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  storageClassName: ${STORAGE_CLASS}
+  resources:
+    requests:
+      storage: 5Gi
 ---
 apiVersion: v1
 kind: Service
@@ -100,4 +120,3 @@ spec:
       targetPort: 4180
   selector:
     app.kubernetes.io/name: oauth2-proxy
-
