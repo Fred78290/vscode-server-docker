@@ -73,6 +73,8 @@ export VSCODE_TLS_CERT=nginx/ssl/cert.pem
 
 export NGINX_INGRESS_CLASS=$(kubectl get ingressclass -o json | jq -r '.items[]|select(.metadata.annotations."ingressclass.kubernetes.io/is-default-class" == "true")|.metadata.name')
 export DRY_RUN=${DRY_RUN:-}
+export USE_CERT_MANANGER=NO
+export USE_EXTERNAL_DNS=NO
 
 NGINX_INGRESS_CLASS=${NGINX_INGRESS_CLASS:=nginx}
 
@@ -116,7 +118,7 @@ function usage {
 	exit 0
 } 
 
-TEMP=$(getopt -o hvxr --long mode:,account-type:,auth-type:,user:,password:,namespace:,hostname:,oauth2-proxy-provider:,oauth2-proxy-client-id:,oauth2-proxy-client-secret:,oauth2-proxy-scope:,vscode-server-cpu-request:,vscode-server-cpu-max:,vscode-server-mem-request:,vscode-server-mem-max:,vscode-server-volume-size:,vscode-server-image:,vscode-server-helper-image:,vscode-server-registry: -n "$0" -- "$@")
+TEMP=$(getopt -o hvxr --long dry-run,use-cert-manager,use-external-dns,mode:,account-type:,auth-type:,user:,password:,namespace:,hostname:,oauth2-proxy-provider:,oauth2-proxy-client-id:,oauth2-proxy-client-secret:,oauth2-proxy-scope:,vscode-server-cpu-request:,vscode-server-cpu-max:,vscode-server-mem-request:,vscode-server-mem-max:,vscode-server-volume-size:,vscode-server-image:,vscode-server-helper-image:,vscode-server-registry: -n "$0" -- "$@")
 
 eval set -- "${TEMP}"
 
@@ -224,6 +226,15 @@ while true; do
 		shift 2
 		;;
 
+	--use-cert-manager)
+		USE_CERT_MANANGER=YES
+		shift
+		;;
+	--use-external-dns)
+		USE_EXTERNAL_DNS=YES
+		shift
+		;;
+
 	--dry-run)
 		DRY_RUN=--dry-run=client
 		shift 1
@@ -262,6 +273,18 @@ VSCODE_SERVER_REDIRECT=$(url_encode "https://${VSCODE_HOSTNAME}/create-space")
 : "${VSCODE_SERVER_IMAGE:?Variable not set or empty}"
 : "${VSCODE_SERVER_HELPER_IMAGE:?Variable not set or empty}"
 
+if [ ${USE_CERT_MANANGER} = "YES" ]; then
+	: "${VSCODE_CERT_CLUSTER_ISSUER:?Variable not set or empty}"
+else
+	FILTER="-e /VSCODE_CERT_CLUSTER_ISSUER/d"
+fi
+
+if [ ${USE_CERT_MANANGER} = "YES" ]; then
+	: "${VSCODE_CERT_CLUSTER_ISSUER:?Variable not set or empty}"
+elif [ ${USE_CERT_MANANGER} != "YES" ]; then
+	FILTER="${FILTER} -e /external-dns/d"
+fi
+
 if [ -z "${VSCODE_TLS_KEY}" ] && [ -z "${VSCODE_TLS_CERT}" ]; then
 	VSCODE_INGRESS_AUTH_URL=$(echo -n ${VSCODE_INGRESS_AUTH_URL} | sed -e 's/https/http/')
 	VSCODE_INGRESS_AUTH_SIGNIN=$(echo -n {VSCODE_INGRESS_AUTH_SIGNIN}  | sed -e 's/https/http/')
@@ -269,7 +292,13 @@ fi
 
 DEFINED_ENVS=$(printf '${%s} ' $(awk "END { for (name in ENVIRON) { print ( name ~ /${VSCODE_ENVSUBST_FILTER}/ ) ? name : \"\" } }" < /dev/null ))
 
+if [ "$(kubectl get ns rediss -o json 2>/dev/null| jq -r '.status.phase/""')" != "Active" ]; then
+	kubernetes/redis/redis.sh
+fi
+
 touch auth
+
+MASTER_REDIS_PASSWORD=$(kubectl get  cm redis-env -n redis -o json | jq -r '.data.MASTER_REDIS_PASSWORD')
 
 if [ ${VSCODE_ACCOUNT_TYPE} == "single" ]; then
 	if [ "${VSCODE_AUTH_TYPE}" == basic ]; then
@@ -288,47 +317,53 @@ if [ ${VSCODE_ACCOUNT_TYPE} == "single" ]; then
 		exit 1
 	fi
 
-	if [ -n "${VSCODE_TLS_KEY}" ] && [ -n "${VSCODE_TLS_CERT}" ]; then
-		cat <<EOF | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
-$(cat ${MAIN_TEMPLATE})
----
-$(kubectl create secret tls vscode-server-ingress-tls -n ${VSCODE_NAMESPACE} --key ${VSCODE_TLS_KEY} --cert ${VSCODE_TLS_CERT} --dry-run=client -o yaml)
----
-$(kubectl create secret generic basic-auth -n ${VSCODE_NAMESPACE} --from-file=auth --from-literal=VSCODE_USER=${VSCODE_USER} --from-literal=VSCODE_PASSWORD=${VSCODE_PASSWORD} --dry-run=client -o yaml)
-EOF
-	else
-		cat <<EOF | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
-$(cat ${MAIN_TEMPLATE})
----
-$(kubectl create secret generic basic-auth -n ${VSCODE_NAMESPACE} --from-file=auth --from-literal=VSCODE_USER=${VSCODE_USER} --from-literal=VSCODE_PASSWORD=${VSCODE_PASSWORD} --dry-run=client -o yaml)
-EOF
-	fi
 else
-
 	if [ ${VSCODE_MODE} == "dev" ]; then
 		MAIN_TEMPLATE=kubernetes/multi-account/dev.yaml
 	else
 		MAIN_TEMPLATE=kubernetes/multi-account/main.yaml
 	fi
-
-	if [ -n "${VSCODE_TLS_KEY}" ] && [ -n "${VSCODE_TLS_CERT}" ]; then
-
-		cat <<EOF | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
-$(cat ${MAIN_TEMPLATE})
----
-$(kubectl create secret tls vscode-server-ingress-tls -n ${VSCODE_NAMESPACE} --key ${VSCODE_TLS_KEY} --cert ${VSCODE_TLS_CERT} --dry-run=client -o yaml)
----
-$(kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} --from-file=kubernetes/multi-account/template.yaml --dry-run=client -o yaml)
-EOF
-
-	else
-
-		cat <<EOF | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
-$(cat ${MAIN_TEMPLATE})
----
-$(kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} --from-file=kubernetes/multi-account/template.yaml --dry-run=client -o yaml)
-EOF
-
-	fi
-
 fi
+
+cat ${MAIN_TEMPLATE} > /tmp/deployed.yml
+
+if [[ "${VSCODE_AUTH_TYPE}" == oauth2 || "${VSCODE_ACCOUNT_TYPE}" == "multi" ]]; then
+	echo "---" >> /tmp/deployed.yml
+	cat kubernetes/oauth2-proxy/oauth2-proxy.yaml >> /tmp/deployed.yml
+
+	echo "---" >> /tmp/deployed.yml
+	kubectl create secret generic redis-tls -n ${VSCODE_NAMESPACE} \
+		--from-file=kubernetes/redis/tls/ca.crt \
+		--from-file=kubernetes/redis/tls/redis.key \
+		--from-file=kubernetes/redis/tls/redis.crt \
+		--dry-run=client -o yaml >> /tmp/deployed.yml
+
+	echo "---" >> /tmp/deployed.yml
+	kubectl create configmap redis-env -n ${VSCODE_NAMESPACE} \
+		--from-literal=MASTER_REDIS_PASSWORD=${MASTER_REDIS_PASSWORD} \
+		--dry-run=client -o yaml >> /tmp/deployed.yml
+fi
+
+if [[ -n "${VSCODE_TLS_KEY}" && -n "${VSCODE_TLS_CERT}" ]]; then
+	echo "---" >> /tmp/deployed.yml
+	kubectl create secret tls vscode-server-ingress-tls -n ${VSCODE_NAMESPACE} \
+		--key ${VSCODE_TLS_KEY} \
+		--cert ${VSCODE_TLS_CERT} \
+		--dry-run=client -o yaml >> /tmp/deployed.yml
+fi
+
+if [ "${VSCODE_AUTH_TYPE}" == basic ]; then
+	echo "---" >> /tmp/deployed.yml
+	kubectl create secret generic basic-auth -n ${VSCODE_NAMESPACE} \
+		--from-file=auth \
+		--from-literal=VSCODE_USER=${VSCODE_USER} \
+		--from-literal=VSCODE_PASSWORD=${VSCODE_PASSWORD} \
+		--dry-run=client -o yaml >> /tmp/deployed.yml
+fi
+
+if [ "${VSCODE_ACCOUNT_TYPE}" == "multi" ]; then
+	echo "---" >> /tmp/deployed.yml
+	kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} --from-file=kubernetes/multi-account/template.yaml --dry-run=client -o yaml >> /tmp/deployed.yml
+fi
+
+sed ${FILTER} /tmp/deployed.yml | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -

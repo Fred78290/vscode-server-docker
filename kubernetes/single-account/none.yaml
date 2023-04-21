@@ -124,7 +124,10 @@ metadata:
   namespace: ${VSCODE_NAMESPACE}
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: HTTP
-    cert-manager.io/cluster-issuer: "${VSCODE_CERT_CLUSTER_ISSUER}"
+    external-dns.alpha.kubernetes.io/hostname: ${ACCOUNT_HOSTNAME}
+    external-dns.alpha.kubernetes.io/target: ${VSCODE_HOSTNAME}
+    external-dns.alpha.kubernetes.io/ttl: '600'
+    cert-manager.io/cluster-issuer: ${VSCODE_CERT_CLUSTER_ISSUER}
 spec:
   ingressClassName: ${NGINX_INGRESS_CLASS}
   tls:
