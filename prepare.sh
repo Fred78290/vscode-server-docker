@@ -6,13 +6,14 @@ export DEBIAN_FRONTEND=noninteractive
 apt update
 apt dist-upgrade -y
 apt install nano sudo gettext-base wget curl git build-essential openssh-client iproute2 libsecret-1-0 dbus-user-session gnome-keyring ca-certificates zlib1g php nginx php-fpm php-intl php-xml php-soap php-redis php-curl php-imagick php-mbstring php-mysql php-sqlite3 -y --no-install-recommends
-echo 'vscode-server ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/vscode-server
 
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 
 chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
 apt update
 apt install gh  -y
+
+echo '#1000 ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/docker
 
 dpkgArch="$(dpkg --print-architecture)"
 
@@ -53,11 +54,6 @@ npm --version
 yarn --version
 go version
 
-groupadd -g 1000 vscode-server
-adduser --uid 1000 --gid 1000 --home ${VSCODE_SERVER_HOME_DIR} vscode-server
-adduser vscode-server root
-mkdir -p ${VSCODE_SERVER_DATA_DIR}
-chown -R vscode-server:vscode-server ${VSCODE_SERVER_DATA_DIR}
 chmod +x /usr/local/bin/tini /docker-entrypoint.sh
 
 apt autoclean

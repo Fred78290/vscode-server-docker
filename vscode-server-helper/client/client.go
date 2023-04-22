@@ -57,6 +57,7 @@ type SingletonClientGenerator struct {
 	kubeClient         kubernetes.Interface
 	cfg                *types.Config
 	kubeOnce           sync.Once
+	lock               sync.Mutex
 }
 
 func encodeToYaml(obj runtime.Object) string {
@@ -201,7 +202,8 @@ func (p *SingletonClientGenerator) kubectl(args ...string) (string, error) {
 	return outBuffer.String(), err
 }
 
-func (p *SingletonClientGenerator) CodeSpaceExists(userName string) (bool, error) {
+func (p *SingletonClientGenerator) codeSpaceExists(userName string) (bool, error) {
+
 	var ns *v1.Namespace
 	kubeclient, err := p.KubeClient()
 
@@ -225,6 +227,13 @@ func (p *SingletonClientGenerator) CodeSpaceExists(userName string) (bool, error
 	}
 
 	return true, nil
+}
+
+func (p *SingletonClientGenerator) CodeSpaceExists(userName string) (bool, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	return p.codeSpaceExists(userName)
 }
 
 func (p *SingletonClientGenerator) waitNameSpaceReady(ctx *context.Context, userName string) (bool, error) {
@@ -504,6 +513,9 @@ func (p *SingletonClientGenerator) createUserCodespace(userName string) error {
 			case "VSCODE_MEM_REQUEST":
 				return p.cfg.MinMemory
 
+			case "VSCODE_USER_HOME":
+				return "/home/" + userName
+
 			default:
 				return fmt.Sprintf("$%s", name)
 			}
@@ -562,9 +574,12 @@ func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.Re
 	var err error
 	var exists bool
 
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
 	redirect := *p.cfg.GetRedirectURL()
 
-	if exists, err = p.CodeSpaceExists(currentUser); err != nil {
+	if exists, err = p.codeSpaceExists(currentUser); err != nil {
 
 		w.Header().Add(contentType, textPlain)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -588,10 +603,15 @@ func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.Re
 	if redirect.Host == "" {
 		redirect.Host = requestutil.GetRequestHost(req)
 		redirect.Scheme = requestutil.GetRequestProto(req)
-		redirect.Path = fmt.Sprintf("/%s?folder=/home/vscode-server/sources", currentUser)
+		redirect.Path = fmt.Sprintf("/%s?folder=/home/%s/sources", currentUser, currentUser)
 	} else {
 		redirect.Path = fmt.Sprintf(redirect.Path, currentUser)
 	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:  "vscode_user",
+		Value: currentUser,
+	})
 
 	http.Redirect(w, req, redirect.String(), http.StatusTemporaryRedirect)
 

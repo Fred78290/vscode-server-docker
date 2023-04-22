@@ -45,6 +45,9 @@ spec:
         app.kubernetes.io/name: vscode-server
     spec:
       serviceAccountName: vscode-server
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: dind-daemon
           image: docker:dind
@@ -70,14 +73,14 @@ spec:
         - name: vscode-server
           image: ${VSCODE_SERVER_IMAGE}
           imagePullPolicy: Always
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
           ports:
             - containerPort: 8000
               name: http
           volumeMounts:
-            - mountPath: /usr/share/vscode-server
-              name: vscode-server-volume
-              subPath: vscode-server-data
-            - mountPath: /home/vscode-server
+            - mountPath: ${VSCODE_USER_HOME}
               name: vscode-server-volume
               subPath: vscode-server-home
             - mountPath: /certs
@@ -88,8 +91,6 @@ spec:
           env:
             - name: VSCODE_KEYRING_PASS
               value: "${VSCODE_KEYRING_PASS}"
-            - name: VSCODE_SERVER_DATA_DIR
-              value: "/usr/share/vscode-server"
           envFrom:
             - configMapRef:
                 name: ${ACCOUNT_NAMESPACE}
@@ -164,19 +165,19 @@ metadata:
     nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /$1
     nginx.ingress.kubernetes.io/configuration-snippet: |
-      rewrite ^/stable|insiders|static|callback|web-extension-resource /${ACCOUNT_NAMESPACE}$uri break;
       sub_filter_types text/html text/html;
       sub_filter_once off;
       sub_filter 'href="/' 'href="/${ACCOUNT_NAMESPACE}/';
       sub_filter 'src="/' 'src="/${ACCOUNT_NAMESPACE}/';
       sub_filter 'href=\'/' 'href=\'/${ACCOUNT_NAMESPACE}/';
       sub_filter 'src=\'/' 'src=\'/${ACCOUNT_NAMESPACE}/';
-    external-dns.alpha.kubernetes.io/hostname: ${ACCOUNT_HOSTNAME}
-    external-dns.alpha.kubernetes.io/target: ${VSCODE_HOSTNAME}
-    external-dns.alpha.kubernetes.io/ttl: '600'
     nginx.ingress.kubernetes.io/auth-url: "${VSCODE_INGRESS_AUTH_URL}"
     nginx.ingress.kubernetes.io/auth-signin: "${VSCODE_INGRESS_AUTH_SIGNIN}"
-    cert-manager.io/cluster-issuer: "${VSCODE_CERT_CLUSTER_ISSUER}"
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-User, X-Auth-Request-Email, X-Auth-Request-Access-Token"
+#    external-dns.alpha.kubernetes.io/hostname: ${ACCOUNT_HOSTNAME}
+#    external-dns.alpha.kubernetes.io/target: ${VSCODE_HOSTNAME}
+#    external-dns.alpha.kubernetes.io/ttl: '600'
+#    cert-manager.io/cluster-issuer: "${VSCODE_CERT_CLUSTER_ISSUER}"
 spec:
   ingressClassName: ${NGINX_INGRESS_CLASS}
   tls:

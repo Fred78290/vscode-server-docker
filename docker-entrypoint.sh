@@ -20,6 +20,15 @@ entrypoint_log() {
     fi
 }
 
+# Create user at fly
+if [ ! -f /etc/sudoers.d/${VSCODE_USER} ]; then
+	sudo groupadd -g 1000 ${VSCODE_USER}
+	sudo adduser --uid 1000 --gid 1000 --home /home/${VSCODE_USER}
+	sudo adduser ${VSCODE_USER} root
+	sudo chown -R ${VSCODE_USER}:${VSCODE_USER} /home/${VSCODE_USER}
+	sudo bash -c "echo '${VSCODE_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/${VSCODE_USER}"
+fi
+
 if /usr/bin/find "/docker-entrypoint.d/" -mindepth 1 -maxdepth 1 -type f -print -quit 2>/dev/null | read v; then
 	entrypoint_log "$0: /docker-entrypoint.d/ is not empty, will attempt to perform configuration"
 
@@ -53,6 +62,6 @@ else
 	entrypoint_log "$0: No files found in /docker-entrypoint.d/, skipping configuration"
 fi
 
-#exec dbus-run-session -- code-server --accept-server-license-terms ${ARGS} --host 0.0.0.0
+export HOME=/home/${VSCODE_USER}
 
 exec dbus-run-session -- sh -c "(echo $VSCODE_KEYRING_PASS | gnome-keyring-daemon --unlock) && code-server ${ARGS}"

@@ -24,13 +24,12 @@ func serve(cfg *types.Config) error {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		if user, found := req.Header["X-User"]; found {
+		if user, found := req.Header["X-Auth-Request-User"]; found {
 			generator.CreateCodeSpace(strings.ToLower(user[0]), w, req)
 		} else {
-			glog.Errorf("X-User not found")
+			glog.Errorf("X-Auth-Request-User not found")
 
-			req.Response.StatusCode = http.StatusPreconditionRequired
-
+			w.WriteHeader(http.StatusPreconditionRequired)
 			w.Header().Set("Content-Type", "text/plain")
 
 			var builder strings.Builder
@@ -40,6 +39,8 @@ func serve(cfg *types.Config) error {
 					fmt.Fprintf(&builder, "%v: %v\n", name, h)
 				}
 			}
+
+			glog.Debugf(builder.String())
 
 			w.Write([]byte(builder.String()))
 		}

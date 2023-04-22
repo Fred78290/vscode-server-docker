@@ -68,10 +68,7 @@ spec:
             - containerPort: 8000
               name: http
           volumeMounts:
-            - mountPath: /usr/share/vscode-server
-              name: vscode-server-volume
-              subPath: vscode-server-data
-            - mountPath: /home/vscode-server
+            - mountPath: /home/vscode
               name: vscode-server-volume
               subPath: vscode-server-home
             - mountPath: /certs
@@ -82,8 +79,8 @@ spec:
           env:
             - name: VSCODE_KEYRING_PASS
               value: ${VSCODE_KEYRING_PASS}
-            - name: VSCODE_SERVER_DATA_DIR
-              value: /usr/share/vscode-server
+            - name: VSCODE_USER
+              value: vscode
           resources:
             limits:
               cpu: ${VSCODE_CPU_MAX}

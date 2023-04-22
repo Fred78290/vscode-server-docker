@@ -162,27 +162,10 @@ metadata:
     nginx.ingress.kubernetes.io/backend-protocol: HTTP
     nginx.ingress.kubernetes.io/auth-url: "https://$host/oauth2/auth"
     nginx.ingress.kubernetes.io/auth-signin: "https://$host/oauth2/start?rd=$escaped_request_uri"
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-User, X-Auth-Request-Email, X-Auth-Request-Access-Token"
     nginx.ingress.kubernetes.io/server-snippet: |
-      location ~ ^/stable|insiders|static|callback|web-extension-resource {
-          proxy_set_header Host $host;
-
-          proxy_set_header Upgrade $http_upgrade;
-          proxy_set_header Connection "upgrade";
-          proxy_set_header X-Real-IP $remote_addr;
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          proxy_set_header X-Auth-Request-Redirect $scheme://$host$request_uri;
-
-          auth_request /oauth2/auth;
-          error_page 401 = /oauth2/start?rd=https://$host$request_uri;
-
-          auth_request_set $user   $upstream_http_x_auth_request_user;
-          auth_request_set $email  $upstream_http_x_auth_request_email;
-          auth_request_set $token  $upstream_http_x_auth_request_access_token;
-          proxy_set_header X-User  $user;
-          proxy_set_header X-Email $email;
-          proxy_set_header X-Access-Token $token;
-
-          rewrite $uri /$user$uri;
+      location ~* "^/(stable|insiders|static|callback|web-extension-resource).*"  {
+          rewrite "(?i)/(.*)" /$cookie_vscode_user/$1;
       }
     external-dns.alpha.kubernetes.io/hostname: ${ACCOUNT_HOSTNAME}
     external-dns.alpha.kubernetes.io/target: ${VSCODE_HOSTNAME}
@@ -243,37 +226,11 @@ spec:
           ports:
             - containerPort: 8000
               protocol: TCP
-          env:
-            - name: DIND_CPU_MAX
-              value: ${DIND_CPU_MAX}
-            - name: DIND_CPU_REQUEST
-              value: ${DIND_CPU_REQUEST}
-            - name: DIND_MEM_MAX
-              value: ${DIND_MEM_MAX}
-            - name: DIND_CPU_REQUEST
-              value: ${DIND_CPU_REQUEST}
-            - name: NGINX_INGRESS_CLASS
-              value: ${NGINX_INGRESS_CLASS}
-            - name: VSCODE_SERVER_IMAGE
-              value: ${VSCODE_SERVER_IMAGE}
-            - name: VSCODE_HOSTNAME
-              value: ${VSCODE_HOSTNAME}
-            - name: VSCODE_PVC_SIZE
-              value: ${VSCODE_PVC_SIZE}
-            - name: VSCODE_CPU_MAX
-              value: ${VSCODE_CPU_MAX}
-            - name: VSCODE_CPU_REQUEST
-              value: ${VSCODE_CPU_REQUEST}
-            - name: VSCODE_MEM_MAX
-              value: ${VSCODE_MEM_MAX}
-            - name: VSCODE_MEM_REQUEST
-              value: ${VSCODE_MEM_REQUEST}
-            - name: VSCODE_KEYRING_PASS
-              value: ${VSCODE_KEYRING_PASS}
-            - name: VSCODE_SERVER_DATA_DIR
-              value: /usr/share/vscode-server
+          envFrom:
+            - configMapRef:
+                name: vscode-server-env
           volumeMounts:
-            - mountPath: /usr/share/vscode-server-helper/template.yaml
+            - mountPath: /usr/share/vscode-server-helper
               name: vscode-server-template
               readOnly: true
       volumes:

@@ -50,10 +50,10 @@ export VSCODE_OAUTH2_PROXY_CLIENT_SECRET=${VSCODE_OAUTH2_PROXY_CLIENT_SECRET:=${
 export VSCODE_OAUTH2_PROXY_SCOPE=${VSCODE_OAUTH2_PROXY_SCOPE:=${GITHUB_DEBUG_OAUTH2_PROXY_SCOPE}}	
 export VSCODE_OAUTH2_PROXY_COOKIE_SECRET=$(dd if=/dev/urandom bs=32 count=1 2>/dev/null | base64 | tr -d -- '\n' | tr -- '+/' '-_'; echo)
 
-export VSCODE_OAUTH2_PROXY_PROVIDER=${GOOGLE_OAUTH2_PROXY_PROVIDER}
-export VSCODE_OAUTH2_PROXY_CLIENT_ID=${GOOGLE_OAUTH2_PROXY_CLIENT_ID}
-export VSCODE_OAUTH2_PROXY_CLIENT_SECRET=${GOOGLE_OAUTH2_PROXY_CLIENT_SECRET}
-export VSCODE_OAUTH2_PROXY_SCOPE=${GOOGLE_OAUTH2_PROXY_SCOPE}
+#export VSCODE_OAUTH2_PROXY_PROVIDER=${GOOGLE_OAUTH2_PROXY_PROVIDER}
+#export VSCODE_OAUTH2_PROXY_CLIENT_ID=${GOOGLE_OAUTH2_PROXY_CLIENT_ID}
+#export VSCODE_OAUTH2_PROXY_CLIENT_SECRET=${GOOGLE_OAUTH2_PROXY_CLIENT_SECRET}
+#export VSCODE_OAUTH2_PROXY_SCOPE=${GOOGLE_OAUTH2_PROXY_SCOPE}
 
 export VSCODE_CPU_REQUEST=500m
 export VSCODE_MEM_REQUEST=512Mi
@@ -326,6 +326,15 @@ cat ${MAIN_TEMPLATE} > /tmp/deployed.yml
 
 if [[ "${VSCODE_AUTH_TYPE}" == oauth2 || "${VSCODE_ACCOUNT_TYPE}" == "multi" ]]; then
 	echo "---" >> /tmp/deployed.yml
+	kubectl create secret generic oauth2-proxy-secrets -n ${VSCODE_NAMESPACE} \
+		--from-literal=VSCODE_OAUTH2_PROXY_PROVIDER="${VSCODE_OAUTH2_PROXY_PROVIDER}" \
+		--from-literal=VSCODE_OAUTH2_PROXY_CLIENT_ID="${VSCODE_OAUTH2_PROXY_CLIENT_ID}" \
+		--from-literal=VSCODE_OAUTH2_PROXY_CLIENT_SECRET="${VSCODE_OAUTH2_PROXY_CLIENT_SECRET}" \
+		--from-literal=VSCODE_OAUTH2_PROXY_COOKIE_SECRET="${VSCODE_OAUTH2_PROXY_COOKIE_SECRET}" \
+		--from-literal=VSCODE_OAUTH2_PROXY_SCOPE="${VSCODE_OAUTH2_PROXY_SCOPE}" \
+		--dry-run=client -o yaml >> /tmp/deployed.yml
+
+	echo "---" >> /tmp/deployed.yml
 	cat kubernetes/oauth2-proxy/oauth2-proxy.yaml >> /tmp/deployed.yml
 fi
 
@@ -355,15 +364,18 @@ if [ "${VSCODE_ACCOUNT_TYPE}" == "multi" ]; then
 		--from-literal=DIND_MEM_REQUEST=${DIND_MEM_REQUEST} \
 		--from-literal=NGINX_INGRESS_CLASS=${NGINX_INGRESS_CLASS} \
 		--from-literal=STORAGE_CLASS=${STORAGE_CLASS} \
-		--from-literal=VSCODE_SERVER_IMAGE=${VSCODE_SERVER_IMAGE} \
-		--from-literal=VSCODE_HOSTNAME=${VSCODE_HOSTNAME} \
-		--from-literal=VSCODE_PVC_SIZE=${VSCODE_PVC_SIZE} \
+		--from-literal=VSCODE_CERT_CLUSTER_ISSUER=${VSCODE_CERT_CLUSTER_ISSUER} \
 		--from-literal=VSCODE_CPU_MAX=${VSCODE_CPU_MAX} \
 		--from-literal=VSCODE_CPU_REQUEST=${VSCODE_CPU_REQUEST} \
+		--from-literal=VSCODE_HOSTNAME=${VSCODE_HOSTNAME} \
+		--from-literal=VSCODE_INGRESS_AUTH_SIGNIN=${VSCODE_INGRESS_AUTH_SIGNIN} \
+		--from-literal=VSCODE_INGRESS_AUTH_URL=${VSCODE_INGRESS_AUTH_URL} \
+		--from-literal=VSCODE_KEYRING_PASS=${VSCODE_KEYRING_PASS} \
 		--from-literal=VSCODE_MEM_MAX=${VSCODE_MEM_MAX} \
 		--from-literal=VSCODE_MEM_REQUEST=${VSCODE_MEM_REQUEST} \
-		--from-literal=VSCODE_KEYRING_PASS=${VSCODE_KEYRING_PASS} \
-		--from-literal=VSCODE_SERVER_DATA_DIR=/usr/share/vscode-server \
+		--from-literal=VSCODE_NAMESPACE=${VSCODE_NAMESPACE} \
+		--from-literal=VSCODE_PVC_SIZE=${VSCODE_PVC_SIZE} \
+		--from-literal=VSCODE_SERVER_IMAGE=${VSCODE_SERVER_IMAGE} \
 		--dry-run=client -o yaml >> /tmp/deployed.yml
 
 	echo "---" >> /tmp/deployed.yml
