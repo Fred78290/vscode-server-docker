@@ -2,12 +2,15 @@ FROM ubuntu:jammy
 LABEL NAME fred78290/vscode-server
 
 ENV VSCODE_USER=vscode-user
+ENV VSCODE_RUNNING_USER=vscode-user
+ENV USER_ID=1000
+ENV GROUP_ID=1000
 
-ENV TINI_VERSION v0.19.0
-ENV DOCKER_VERSION 23.0.3
-ENV NODE_VERSION 19.9.0
-ENV YARN_VERSION 1.22.19
-ENV GOLANG_VERSION 1.20.3
+ENV TINI_VERSION=v0.19.0
+ENV DOCKER_VERSION=23.0.3
+ENV NODE_VERSION=19.9.0
+ENV YARN_VERSION=1.22.19
+ENV GOLANG_VERSION=1.20.3
 
 ENV PATH /usr/local/go/bin:/usr/local/yarn/bin:$PATH
 
@@ -19,7 +22,7 @@ ADD prepare.sh /prepare.sh
 
 RUN /prepare.sh && rm /prepare.sh
 
-USER 1000
+USER $USER_ID:$GROUP_ID
 
 ENTRYPOINT ["/usr/local/bin/tini", "--"]
 CMD [ "/docker-entrypoint.sh" ]

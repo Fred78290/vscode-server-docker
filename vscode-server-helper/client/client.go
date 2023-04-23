@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -12,10 +13,13 @@ import (
 	"time"
 
 	"github.com/Fred78290/vscode-server-helper/context"
+	"github.com/Fred78290/vscode-server-helper/pagewriter"
 	"github.com/Fred78290/vscode-server-helper/types"
 	"github.com/Fred78290/vscode-server-helper/utils"
 	"github.com/drone/envsubst"
 	"github.com/linki/instrumented_http"
+	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/middleware"
+	cookies "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/cookies"
 	requestutil "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/requests/util"
 	glog "github.com/sirupsen/logrus"
 
@@ -42,6 +46,7 @@ const (
 	ingressName    = "vscode-server-%s"
 	contentType    = "Content-Type"
 	textPlain      = "text/plain"
+	errorPage      = "Error occured: %v"
 )
 
 var defaultConfigFlags = genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag().WithDiscoveryBurst(300).WithDiscoveryQPS(50.0)
@@ -56,6 +61,7 @@ type SingletonClientGenerator struct {
 	ObjectReadyTimeout time.Duration
 	kubeClient         kubernetes.Interface
 	cfg                *types.Config
+	pagewriter         pagewriter.Writer
 	kubeOnce           sync.Once
 	lock               sync.Mutex
 }
@@ -81,15 +87,29 @@ func encodeToYaml(obj runtime.Object) string {
 }
 
 func NewClientGenerator(cfg *types.Config) types.ClientGenerator {
-	return &SingletonClientGenerator{
-		KubeConfig:         cfg.KubeConfig,
-		APIServerURL:       cfg.APIServerURL,
-		RequestTimeout:     cfg.RequestTimeout,
-		ObjectReadyTimeout: cfg.ObjectReadyTimeout,
-		DeletionTimeout:    cfg.DeletionTimeout,
-		MaxGracePeriod:     cfg.MaxGracePeriod,
-		cfg:                cfg,
+	opts := pagewriter.Opts{
+		TemplatesPath: cfg.TemplatePath,
+		Footer:        cfg.TemplateFooter,
+		Version:       cfg.Version,
+		Debug:         cfg.Debug,
 	}
+
+	if pageWriter, err := pagewriter.NewWriter(opts); err != nil {
+		glog.Panicf("error initialising page writer: %v", err)
+	} else {
+		return &SingletonClientGenerator{
+			KubeConfig:         cfg.KubeConfig,
+			APIServerURL:       cfg.APIServerURL,
+			RequestTimeout:     cfg.RequestTimeout,
+			ObjectReadyTimeout: cfg.ObjectReadyTimeout,
+			DeletionTimeout:    cfg.DeletionTimeout,
+			MaxGracePeriod:     cfg.MaxGracePeriod,
+			cfg:                cfg,
+			pagewriter:         pageWriter,
+		}
+	}
+
+	return nil
 }
 
 // getRestConfig returns the rest clients config to get automatically
@@ -158,6 +178,10 @@ func newKubeClient(kubeConfig, apiServerURL string, requestTimeout time.Duration
 
 func (p *SingletonClientGenerator) newRequestContext() *context.Context {
 	return utils.NewRequestContext(p.RequestTimeout)
+}
+
+func (p *SingletonClientGenerator) GetPageWriter() pagewriter.Writer {
+	return p.pagewriter
 }
 
 // KubeClient generates a kube client if it was not created before
@@ -336,10 +360,10 @@ func (p *SingletonClientGenerator) waitAppReady(userName string) (bool, error) {
 
 	if ready, err := p.waitNameSpaceReady(ctx, userName); err != nil || !ready {
 		return ready, err
-	} else if ready, err := p.waitDeploymentReady(ctx, userName, userName); err != nil || !ready {
+	} else if ready, err := p.waitDeploymentReady(ctx, userName, p.cfg.VSCodeAppName); err != nil || !ready {
 		return ready, err
 	} else {
-		return p.waitIngressReady(ctx, userName, userName)
+		return p.waitIngressReady(ctx, userName, p.cfg.VSCodeAppName)
 	}
 
 }
@@ -513,6 +537,9 @@ func (p *SingletonClientGenerator) createUserCodespace(userName string) error {
 			case "VSCODE_MEM_REQUEST":
 				return p.cfg.MinMemory
 
+			case "VSCODE_RUNNING_USER":
+				return userName
+
 			case "VSCODE_USER_HOME":
 				return "/home/" + userName
 
@@ -539,81 +566,140 @@ func (p *SingletonClientGenerator) createUserCodespace(userName string) error {
 	return err
 }
 
-func (p *SingletonClientGenerator) DeleteCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) error {
+func (p *SingletonClientGenerator) DeleteCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) {
 	var err error
 	var exists bool
 
 	if exists, err = p.CodeSpaceExists(currentUser); err != nil {
 
-		w.Header().Add(contentType, textPlain)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf("Unable to find user: %s, %v", currentUser, err.Error())))
+		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+			Status:    http.StatusInternalServerError,
+			RequestID: currentUser,
+			AppError:  fmt.Sprintf("Could not find codespace for user: %s", currentUser),
+			Messages: []interface{}{
+				errorPage,
+				err,
+			},
+		})
 
 	} else if exists {
 
 		if err = p.deleteUserCodespace(currentUser); err == nil {
-			w.Header().Add(contentType, textPlain)
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(fmt.Sprintf("User %s deleted", currentUser)))
+			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+				Status:      http.StatusOK,
+				RedirectURL: p.cfg.VSCodeSignoutURL,
+				RequestID:   currentUser,
+				AppError:    "OK",
+				Messages: []interface{}{
+					"User %s deleted",
+					currentUser,
+				},
+			})
+
 		} else {
-			w.Header().Add(contentType, textPlain)
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(fmt.Sprintf("Unable to delete user: %s, %v", currentUser, err.Error())))
+			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+				Status:    http.StatusInternalServerError,
+				RequestID: currentUser,
+				AppError:  fmt.Sprintf("Unable to delete user: %s", currentUser),
+				Messages: []interface{}{
+					errorPage,
+					err,
+				},
+			})
 		}
 
 	} else {
-		w.Header().Add(contentType, textPlain)
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(fmt.Sprintf("User %s not found", currentUser)))
+		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+			Status:    http.StatusNotFound,
+			RequestID: currentUser,
+			AppError:  "Not found",
+			Messages: []interface{}{
+				"User %s not found",
+				currentUser,
+			},
+		})
 	}
-
-	return err
 }
 
-func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) error {
+func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) {
 	var err error
 	var exists bool
+	var redirect *url.URL
 
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	redirect := *p.cfg.GetRedirectURL()
-
 	if exists, err = p.codeSpaceExists(currentUser); err != nil {
 
-		w.Header().Add(contentType, textPlain)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
+		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+			Status:    http.StatusInternalServerError,
+			RequestID: middleware.GetRequestScope(req).RequestID,
+			AppError:  fmt.Sprintf("Could not find codespace for user: %s", currentUser),
+			Messages: []interface{}{
+				errorPage,
+				err,
+			},
+		})
 
-		return err
+		return
 	}
 
 	if !exists {
 
 		if err = p.createUserCodespace(currentUser); err != nil {
-			w.Header().Add(contentType, textPlain)
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
+			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+				Status:    http.StatusInternalServerError,
+				RequestID: middleware.GetRequestScope(req).RequestID,
+				AppError:  fmt.Sprintf("Could not create codespace for user: %s", currentUser),
+				Messages: []interface{}{
+					errorPage,
+					err,
+				},
+			})
 
-			return err
+			return
 		}
 
 	}
 
-	if redirect.Host == "" {
-		redirect.Host = requestutil.GetRequestHost(req)
-		redirect.Scheme = requestutil.GetRequestProto(req)
-		redirect.Path = fmt.Sprintf("/%s?folder=/home/%s/sources", currentUser, currentUser)
-	} else {
-		redirect.Path = fmt.Sprintf(redirect.Path, currentUser)
+	domain := cookies.GetCookieDomain(req, p.cfg.VSCodeCookieDomain)
+
+	// If nothing matches, create the cookie with the shortest domain
+	if domain == "" && len(p.cfg.VSCodeCookieDomain) > 0 {
+		glog.Errorf("Warning: request host %q did not match any of the specific cookie domains of %q",
+			requestutil.GetRequestHost(req),
+			strings.Join(p.cfg.VSCodeCookieDomain, ","),
+		)
+		domain = p.cfg.VSCodeCookieDomain[len(p.cfg.VSCodeCookieDomain)-1]
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:  "vscode_user",
-		Value: currentUser,
+		Name:   "vscode_user",
+		Domain: domain,
+		Value:  currentUser,
 	})
 
-	http.Redirect(w, req, redirect.String(), http.StatusTemporaryRedirect)
+	if p.cfg.RedirectURL != "" {
+		redirect, _ = url.Parse(fmt.Sprintf(p.cfg.RedirectURL, currentUser, currentUser))
+	} else {
+		redirect = &url.URL{
+			Host:   requestutil.GetRequestHost(req),
+			Scheme: requestutil.GetRequestProto(req),
+			Path:   fmt.Sprintf("/%s?folder=/home/%s/sources", currentUser, currentUser),
+		}
+	}
 
-	return nil
+	http.Redirect(w, req, redirect.String(), http.StatusTemporaryRedirect)
+}
+
+func (p *SingletonClientGenerator) RequestUserMissing(w http.ResponseWriter, req *http.Request) {
+	p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+		Status:    http.StatusPreconditionRequired,
+		RequestID: middleware.GetRequestScope(req).RequestID,
+		AppError:  "Missing arguments",
+		Messages: []interface{}{
+			"Missing header: %s",
+			"X-Auth-Request-User",
+		},
+	})
 }

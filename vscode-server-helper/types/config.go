@@ -19,10 +19,16 @@ type Config struct {
 	VSCodeHostname         string
 	VSCodeTemplatePath     string
 	VSCodeServerNameSpace  string
+	VSCodeAppName          string
+	VSCodeSignoutURL       string
+	VSCodeCookieDomain     []string
 	RequestTimeout         time.Duration
 	DeletionTimeout        time.Duration
 	MaxGracePeriod         time.Duration
 	ObjectReadyTimeout     time.Duration
+	TemplatePath           string
+	TemplateBanner         string
+	TemplateFooter         string
 	PersistentVolumeSize   string
 	MinCpus                string
 	MinMemory              string
@@ -35,7 +41,8 @@ type Config struct {
 	DisplayVersion         bool
 	LogFormat              string
 	LogLevel               string
-	redirectURL            *url.URL
+	Debug                  bool
+	Version                string
 }
 
 const (
@@ -45,13 +52,15 @@ const (
 	DefaultObjectReadyTimeout time.Duration = 300 * time.Second
 )
 
-func NewConfig() *Config {
+func NewConfig(version string) *Config {
 	return &Config{
 		Listen:                 "0.0.0.0:8000",
 		VSCodeHostname:         "localhost",
 		VSCodeIngressTlsSecret: "vscode-server-ingress-tls",
 		VSCodeTemplatePath:     "/vscode-server-helper/template.yaml",
 		VSCodeServerNameSpace:  "vscode-server",
+		VSCodeAppName:          "vscode-server",
+		VSCodeSignoutURL:       "/oauth2/sign_out?rd=/logout",
 		PrefixPath:             "/create-space",
 		RequestTimeout:         DefaultMaxRequestTimeout,
 		DeletionTimeout:        DefaultMaxDeletionPeriod,
@@ -65,6 +74,7 @@ func NewConfig() *Config {
 		DisplayVersion:         false,
 		LogFormat:              "text",
 		LogLevel:               glog.InfoLevel.String(),
+		Version:                version,
 	}
 }
 
@@ -84,6 +94,10 @@ func (cfg *Config) ParseFlags(args []string, version string) error {
 	app.DefaultEnvars()
 
 	app.Flag("version", "Display version and exit").BoolVar(&cfg.DisplayVersion)
+	app.Flag("debug", "Debug mode").BoolVar(&cfg.Debug)
+	app.Flag("custom-templates-dir", "path to custom html templates").Default(cfg.TemplatePath).StringVar(&cfg.TemplatePath)
+	app.Flag("banner", "custom banner string. Use \"-\" to disable default banner.").Default(cfg.TemplateBanner).StringVar(&cfg.TemplateBanner)
+	app.Flag("footer", "custom footer string. Use \"-\" to disable default footer.").Default(cfg.TemplateFooter).StringVar(&cfg.TemplateFooter)
 
 	app.Flag("log-format", "The format in which log messages are printed (default: text, options: text, json)").Default(cfg.LogFormat).EnumVar(&cfg.LogFormat, "text", "json")
 	app.Flag("log-level", "Set the level of logging. (default: info, options: panic, debug, info, warning, error, fatal").Default(cfg.LogLevel).EnumVar(&cfg.LogLevel, allLogLevelsAsStrings()...)
@@ -94,8 +108,11 @@ func (cfg *Config) ParseFlags(args []string, version string) error {
 
 	app.Flag("vscode-ingress-secret-tls", "the ingress tls used for vscode-server").Default(cfg.VSCodeIngressTlsSecret).StringVar(&cfg.VSCodeIngressTlsSecret)
 	app.Flag("vscode-namespace", "the name space of vscode-server").Default(cfg.VSCodeServerNameSpace).StringVar(&cfg.VSCodeServerNameSpace)
+	app.Flag("vscode-app-name", "the deployment and ingress name of vscode-server").Default(cfg.VSCodeAppName).StringVar(&cfg.VSCodeAppName)
 	app.Flag("vscode-template-file", "the template used to create vscode-server").Default(cfg.VSCodeTemplatePath).StringVar(&cfg.VSCodeTemplatePath)
 	app.Flag("vscode-hostname", "the hostname of vscode-server").Default(cfg.VSCodeHostname).StringVar(&cfg.VSCodeHostname)
+	app.Flag("vscode-cookie-domain", "Optional cookie domains to force cookies to (ie: `.yourcompany.com`). The longest domain matching the request's host will be used (or the shortest cookie domain if there is no match).").StringsVar(&cfg.VSCodeCookieDomain)
+	app.Flag("vscode-sign-out", "Optional signout URL").Default(cfg.VSCodeSignoutURL).StringVar(&cfg.VSCodeSignoutURL)
 
 	app.Flag("use-tls", "Tell to use https instead http").Default("false").BoolVar(&cfg.UseTls)
 	app.Flag("tls-key-file", "Locate the tls key file").Default(cfg.TlsKey).StringVar(&cfg.TlsKey)
@@ -120,11 +137,7 @@ func (cfg *Config) ParseFlags(args []string, version string) error {
 	}
 
 	if cfg.RedirectURL != "" {
-		cfg.redirectURL, err = url.Parse(cfg.RedirectURL)
-	} else {
-		cfg.redirectURL = &url.URL{
-			Path: "/",
-		}
+		_, err = url.Parse(fmt.Sprintf(cfg.RedirectURL, "test0", "test1"))
 	}
 
 	if !utils.FileExistAndReadable(cfg.VSCodeTemplatePath) {
@@ -132,10 +145,6 @@ func (cfg *Config) ParseFlags(args []string, version string) error {
 	}
 
 	return err
-}
-
-func (cfg *Config) GetRedirectURL() *url.URL {
-	return cfg.redirectURL
 }
 
 func (cfg *Config) String() string {

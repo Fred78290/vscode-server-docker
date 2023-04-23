@@ -2,16 +2,18 @@ package main
 
 import (
 	"crypto/tls"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/Fred78290/vscode-server-helper/client"
+	"github.com/Fred78290/vscode-server-helper/pagewriter"
 	"github.com/Fred78290/vscode-server-helper/types"
 	glog "github.com/sirupsen/logrus"
 )
+
+const authRequestUserHeader = "X-Auth-Request-User"
 
 var phVersion = "v0.0.0-unset"
 var phBuildDate = ""
@@ -23,26 +25,45 @@ func serve(cfg *types.Config) error {
 
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, req *http.Request) {
+		generator.GetPageWriter().WriteRobotsTxt(w, req)
+	})
+
+	mux.HandleFunc("/echo", func(w http.ResponseWriter, req *http.Request) {
+		generator.GetPageWriter().WriteErrorPage(w, pagewriter.ErrorPageOpts{
+			Status:   http.StatusOK,
+			AppError: "OK",
+			Messages: []interface{}{
+				"%s",
+				"Nothing to show",
+			},
+		})
+	})
+
+	mux.HandleFunc("/logout", func(w http.ResponseWriter, req *http.Request) {
+		generator.GetPageWriter().WriteErrorPage(w, pagewriter.ErrorPageOpts{
+			Status:   http.StatusOK,
+			AppError: "User signed out",
+			Messages: []interface{}{
+				"%s",
+				"Nothing to show",
+			},
+		})
+	})
+
+	mux.HandleFunc("/delete", func(w http.ResponseWriter, req *http.Request) {
+		if user, found := req.Header[authRequestUserHeader]; found {
+			generator.DeleteCodeSpace(strings.ToLower(user[0]), w, req)
+		} else {
+			generator.RequestUserMissing(w, req)
+		}
+	})
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		if user, found := req.Header["X-Auth-Request-User"]; found {
+		if user, found := req.Header[authRequestUserHeader]; found {
 			generator.CreateCodeSpace(strings.ToLower(user[0]), w, req)
 		} else {
-			glog.Errorf("X-Auth-Request-User not found")
-
-			w.WriteHeader(http.StatusPreconditionRequired)
-			w.Header().Set("Content-Type", "text/plain")
-
-			var builder strings.Builder
-
-			for name, headers := range req.Header {
-				for _, h := range headers {
-					fmt.Fprintf(&builder, "%v: %v\n", name, h)
-				}
-			}
-
-			glog.Debugf(builder.String())
-
-			w.Write([]byte(builder.String()))
+			generator.RequestUserMissing(w, req)
 		}
 	})
 
@@ -75,7 +96,7 @@ func serve(cfg *types.Config) error {
 }
 
 func main() {
-	cfg := types.NewConfig()
+	cfg := types.NewConfig(phVersion)
 
 	if err := cfg.ParseFlags(os.Args[1:], phVersion); err != nil {
 		log.Fatalf("flag parsing error: %v", err)

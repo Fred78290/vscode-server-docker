@@ -79,7 +79,7 @@ spec:
           env:
             - name: VSCODE_KEYRING_PASS
               value: ${VSCODE_KEYRING_PASS}
-            - name: VSCODE_USER
+            - name: VSCODE_RUNNING_USER
               value: vscode
           resources:
             limits:

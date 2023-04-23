@@ -189,6 +189,49 @@ spec:
                 port:
                   number: 8000
 ---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vscode-server-ingress-noauth
+  namespace: ${VSCODE_NAMESPACE}
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: HTTP
+    external-dns.alpha.kubernetes.io/hostname: ${ACCOUNT_HOSTNAME}
+    external-dns.alpha.kubernetes.io/target: ${VSCODE_HOSTNAME}
+    external-dns.alpha.kubernetes.io/ttl: "600"
+    cert-manager.io/cluster-issuer: ${VSCODE_CERT_CLUSTER_ISSUER}
+spec:
+  ingressClassName: ${NGINX_INGRESS_CLASS}
+  tls:
+    - hosts:
+        - ${VSCODE_HOSTNAME}
+      secretName: vscode-server-ingress-tls
+  rules:
+    - host: ${VSCODE_HOSTNAME}
+      http:
+        paths:
+          - path: /robots.txt
+            pathType: Prefix
+            backend:
+              service:
+                name: vscode-server-helper
+                port:
+                  number: 8000
+          - path: /echo
+            pathType: Prefix
+            backend:
+              service:
+                name: vscode-server-helper
+                port:
+                  number: 8000
+          - path: /logout
+            pathType: Prefix
+            backend:
+              service:
+                name: vscode-server-helper
+                port:
+                  number: 8000
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

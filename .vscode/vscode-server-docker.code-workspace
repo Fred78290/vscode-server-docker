@@ -57,10 +57,11 @@
 					"VSCODE_SERVER_IMAGE": "devregistry.aldunelabs.com/vscode-server:v0.1.0"
 				},
 				"args": [
-					"--redirect-url=https://vscode-server-debug.aldunelabs.com/%25s/?folder=/home/%25s/sources",
+					"--redirect-url=https://vscode-server-debug.aldunelabs.com/%s/?folder=/home/%s/sources",
 					"--prefix=/create-space",
 					"--vscode-ingress-secret-tls=vscode-server-ingress-tls",
 					"--vscode-namespace=vscode-server",
+					"--vscode-app-name=vscode-server",
 					"--vscode-template-file=${workspaceFolder}/kubernetes/multi-account/template.yaml",
 					"--listen=0.0.0.0:8000"
 				]

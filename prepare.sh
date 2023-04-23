@@ -13,8 +13,6 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githu
 apt update
 apt install gh  -y
 
-echo '#1000 ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/docker
-
 dpkgArch="$(dpkg --print-architecture)"
 
 case "${dpkgArch##*-}" in
@@ -53,6 +51,12 @@ node --version
 npm --version
 yarn --version
 go version
+set -x
+groupadd -g ${GROUP_ID} ${VSCODE_USER}
+adduser --uid ${USER_ID} --gid ${GROUP_ID} --home /home/${VSCODE_USER} ${VSCODE_USER}
+adduser ${VSCODE_USER} root
+chown -R ${VSCODE_USER}:${VSCODE_USER} /home/${VSCODE_USER}
+bash -c "echo '${VSCODE_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/${VSCODE_USER}"
 
 chmod +x /usr/local/bin/tini /docker-entrypoint.sh
 

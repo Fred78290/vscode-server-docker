@@ -3,11 +3,13 @@ package types
 import (
 	"net/http"
 
-	"k8s.io/client-go/kubernetes"
+	"github.com/Fred78290/vscode-server-helper/pagewriter"
 )
 
 type ClientGenerator interface {
-	KubeClient() (kubernetes.Interface, error)
+	GetPageWriter() pagewriter.Writer
 	CodeSpaceExists(userName string) (bool, error)
-	CreateCodeSpace(userName string, w http.ResponseWriter, req *http.Request) error
+	DeleteCodeSpace(userName string, w http.ResponseWriter, req *http.Request)
+	CreateCodeSpace(userName string, w http.ResponseWriter, req *http.Request)
+	RequestUserMissing(w http.ResponseWriter, req *http.Request)
 }

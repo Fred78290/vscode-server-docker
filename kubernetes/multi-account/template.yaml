@@ -80,7 +80,7 @@ spec:
             - containerPort: 8000
               name: http
           volumeMounts:
-            - mountPath: ${VSCODE_USER_HOME}
+            - mountPath: /home
               name: vscode-server-volume
               subPath: vscode-server-home
             - mountPath: /certs
@@ -91,6 +91,8 @@ spec:
           env:
             - name: VSCODE_KEYRING_PASS
               value: "${VSCODE_KEYRING_PASS}"
+            - name: VSCODE_RUNNING_USER
+              value: "${VSCODE_RUNNING_USER}"
           envFrom:
             - configMapRef:
                 name: ${ACCOUNT_NAMESPACE}
@@ -158,7 +160,7 @@ subjects:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: ingress-vscode-server-${ACCOUNT_NAMESPACE}
+  name: vscode-server
   namespace: ${ACCOUNT_NAMESPACE}
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: HTTP
