@@ -5,7 +5,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 apt update
 apt dist-upgrade -y
-apt install nano sudo gettext-base wget curl git build-essential openssh-client iproute2 libsecret-1-0 dbus-user-session gnome-keyring ca-certificates zlib1g php nginx php-fpm php-intl php-xml php-soap php-redis php-curl php-imagick php-mbstring php-mysql php-sqlite3 -y --no-install-recommends
+apt install nano sudo python3 jq gettext-base wget curl git build-essential openssh-client iproute2 libsecret-1-0 dbus-user-session gnome-keyring ca-certificates zlib1g php nginx php-fpm php-intl php-xml php-soap php-redis php-curl php-imagick php-mbstring php-mysql php-sqlite3 -y --no-install-recommends
 
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 
 chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
