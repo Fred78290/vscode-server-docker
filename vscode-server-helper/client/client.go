@@ -18,7 +18,6 @@ import (
 	"github.com/Fred78290/vscode-server-helper/utils"
 	"github.com/drone/envsubst"
 	"github.com/linki/instrumented_http"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/middleware"
 	cookies "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/cookies"
 	requestutil "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/requests/util"
 	glog "github.com/sirupsen/logrus"
@@ -47,6 +46,7 @@ const (
 	contentType    = "Content-Type"
 	textPlain      = "text/plain"
 	errorPage      = "Error occured: %v"
+	userNotFound   = "Could not find codespace for user: %s"
 )
 
 var defaultConfigFlags = genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag().WithDiscoveryBurst(300).WithDiscoveryQPS(50.0)
@@ -566,6 +566,47 @@ func (p *SingletonClientGenerator) createUserCodespace(userName string) error {
 	return err
 }
 
+func (p *SingletonClientGenerator) ShouldDeleteCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) {
+	var err error
+	var exists bool
+
+	if exists, err = p.CodeSpaceExists(currentUser); err != nil {
+
+		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+			Status:   http.StatusInternalServerError,
+			AppError: fmt.Sprintf(userNotFound, currentUser),
+			Messages: []interface{}{
+				errorPage,
+				err,
+			},
+		})
+
+	} else if exists {
+
+		referer := req.Referer()
+
+		if referer == "" {
+			referer = "/"
+		}
+
+		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+			Status:       http.StatusOK,
+			RedirectURL:  referer,
+			AppError:     fmt.Sprintf("Delete user %s ?", currentUser),
+			ButtonText:   "Delete",
+			ButtonCancel: "Cancel",
+			ButtonAction: "/delete",
+			ButtonMethod: "POST",
+		})
+
+	} else {
+		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+			Status:   http.StatusNotFound,
+			AppError: fmt.Sprintf(userNotFound, currentUser),
+		})
+	}
+}
+
 func (p *SingletonClientGenerator) DeleteCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) {
 	var err error
 	var exists bool
@@ -573,9 +614,8 @@ func (p *SingletonClientGenerator) DeleteCodeSpace(currentUser string, w http.Re
 	if exists, err = p.CodeSpaceExists(currentUser); err != nil {
 
 		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:    http.StatusInternalServerError,
-			RequestID: currentUser,
-			AppError:  fmt.Sprintf("Could not find codespace for user: %s", currentUser),
+			Status:   http.StatusInternalServerError,
+			AppError: fmt.Sprintf(userNotFound, currentUser),
 			Messages: []interface{}{
 				errorPage,
 				err,
@@ -586,21 +626,18 @@ func (p *SingletonClientGenerator) DeleteCodeSpace(currentUser string, w http.Re
 
 		if err = p.deleteUserCodespace(currentUser); err == nil {
 			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-				Status:      http.StatusOK,
-				RedirectURL: p.cfg.VSCodeSignoutURL,
-				RequestID:   currentUser,
-				AppError:    "OK",
-				Messages: []interface{}{
-					"User %s deleted",
-					currentUser,
-				},
+				Status:       http.StatusOK,
+				RedirectURL:  p.cfg.VSCodeSignoutURL,
+				AppError:     fmt.Sprintf("User %s deleted", currentUser),
+				ButtonText:   "Sign out",
+				ButtonCancel: "-",
+				ButtonAction: p.cfg.VSCodeSignoutURL,
 			})
 
 		} else {
 			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-				Status:    http.StatusInternalServerError,
-				RequestID: currentUser,
-				AppError:  fmt.Sprintf("Unable to delete user: %s", currentUser),
+				Status:   http.StatusInternalServerError,
+				AppError: fmt.Sprintf("Unable to delete user: %s", currentUser),
 				Messages: []interface{}{
 					errorPage,
 					err,
@@ -610,13 +647,8 @@ func (p *SingletonClientGenerator) DeleteCodeSpace(currentUser string, w http.Re
 
 	} else {
 		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:    http.StatusNotFound,
-			RequestID: currentUser,
-			AppError:  "Not found",
-			Messages: []interface{}{
-				"User %s not found",
-				currentUser,
-			},
+			Status:   http.StatusNotFound,
+			AppError: fmt.Sprintf(userNotFound, currentUser),
 		})
 	}
 }
@@ -632,9 +664,8 @@ func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.Re
 	if exists, err = p.codeSpaceExists(currentUser); err != nil {
 
 		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:    http.StatusInternalServerError,
-			RequestID: middleware.GetRequestScope(req).RequestID,
-			AppError:  fmt.Sprintf("Could not find codespace for user: %s", currentUser),
+			Status:   http.StatusInternalServerError,
+			AppError: fmt.Sprintf(userNotFound, currentUser),
 			Messages: []interface{}{
 				errorPage,
 				err,
@@ -648,9 +679,8 @@ func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.Re
 
 		if err = p.createUserCodespace(currentUser); err != nil {
 			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-				Status:    http.StatusInternalServerError,
-				RequestID: middleware.GetRequestScope(req).RequestID,
-				AppError:  fmt.Sprintf("Could not create codespace for user: %s", currentUser),
+				Status:   http.StatusInternalServerError,
+				AppError: fmt.Sprintf("Could not create codespace for user: %s", currentUser),
 				Messages: []interface{}{
 					errorPage,
 					err,
@@ -694,12 +724,7 @@ func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.Re
 
 func (p *SingletonClientGenerator) RequestUserMissing(w http.ResponseWriter, req *http.Request) {
 	p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-		Status:    http.StatusPreconditionRequired,
-		RequestID: middleware.GetRequestScope(req).RequestID,
-		AppError:  "Missing arguments",
-		Messages: []interface{}{
-			"Missing header: %s",
-			"X-Auth-Request-User",
-		},
+		Status:   http.StatusPreconditionRequired,
+		AppError: "Missing header: X-Auth-Request-User",
 	})
 }

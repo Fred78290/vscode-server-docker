@@ -52,6 +52,14 @@ type ErrorPageOpts struct {
 	RequestID string
 	// App Error shown in debug mode
 	AppError string
+	// Text for button
+	ButtonText string
+	// Text for button
+	ButtonCancel string
+	// Action for button
+	ButtonAction string
+	// Method for button
+	ButtonMethod string
 	// Generic error messages shown in non-debug mode
 	Messages []interface{}
 }
@@ -62,26 +70,50 @@ type ErrorPageOpts struct {
 func (e *errorPageWriter) WriteErrorPage(rw http.ResponseWriter, opts ErrorPageOpts) {
 	rw.WriteHeader(opts.Status)
 
+	if opts.ButtonMethod == "" {
+		opts.ButtonMethod = "GET"
+	}
+
+	if opts.ButtonAction == "" {
+		opts.ButtonAction = e.proxyPrefix + "/sign_in"
+	}
+
+	if opts.ButtonCancel == "" {
+		opts.ButtonCancel = "Go back"
+	}
+
+	if opts.ButtonText == "" {
+		opts.ButtonText = "Sign in"
+	}
+
 	// We allow unescaped template.HTML since it is user configured options
 	/* #nosec G203 */
 	data := struct {
-		Title       string
-		Message     string
-		ProxyPrefix string
-		StatusCode  int
-		Redirect    string
-		RequestID   string
-		Footer      template.HTML
-		Version     string
+		Title        string
+		Message      string
+		ProxyPrefix  string
+		StatusCode   int
+		Redirect     string
+		RequestID    string
+		ButtonText   string
+		ButtonCancel string
+		ButtonAction string
+		ButtonMethod string
+		Footer       template.HTML
+		Version      string
 	}{
-		Title:       http.StatusText(opts.Status),
-		Message:     e.getMessage(opts.Status, opts.AppError, opts.Messages...),
-		ProxyPrefix: e.proxyPrefix,
-		StatusCode:  opts.Status,
-		Redirect:    opts.RedirectURL,
-		RequestID:   opts.RequestID,
-		Footer:      template.HTML(e.footer),
-		Version:     e.version,
+		Title:        opts.AppError, //http.StatusText(opts.Status),
+		Message:      e.getMessage(opts.Status, opts.Messages...),
+		ProxyPrefix:  e.proxyPrefix,
+		StatusCode:   opts.Status,
+		Redirect:     opts.RedirectURL,
+		RequestID:    opts.RequestID,
+		ButtonText:   opts.ButtonText,
+		ButtonCancel: opts.ButtonCancel,
+		ButtonAction: opts.ButtonAction,
+		ButtonMethod: opts.ButtonMethod,
+		Footer:       template.HTML(e.footer),
+		Version:      e.version,
 	}
 
 	if err := e.template.Execute(rw, data); err != nil {
@@ -112,11 +144,7 @@ func (e *errorPageWriter) ProxyErrorHandler(rw http.ResponseWriter, req *http.Re
 // Otherwise, any messages will be used.
 // The first message is expected to be a format string.
 // If no messages are supplied, a default error message will be used.
-func (e *errorPageWriter) getMessage(status int, appError string, messages ...interface{}) string {
-	if e.debug {
-		return appError
-	}
-
+func (e *errorPageWriter) getMessage(status int, messages ...interface{}) string {
 	if len(messages) > 0 {
 		format := fmt.Sprintf("%v", messages[0])
 
@@ -127,5 +155,5 @@ func (e *errorPageWriter) getMessage(status int, appError string, messages ...in
 		return msg
 	}
 
-	return "Unknown error"
+	return ""
 }

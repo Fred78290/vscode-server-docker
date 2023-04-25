@@ -31,29 +31,31 @@ func serve(cfg *types.Config) error {
 
 	mux.HandleFunc("/echo", func(w http.ResponseWriter, req *http.Request) {
 		generator.GetPageWriter().WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:   http.StatusOK,
-			AppError: "OK",
-			Messages: []interface{}{
-				"%s",
-				"Nothing to show",
-			},
+			Status:       http.StatusOK,
+			AppError:     "Echo",
+			ButtonText:   "OK",
+			ButtonCancel: "-",
 		})
 	})
 
 	mux.HandleFunc("/logout", func(w http.ResponseWriter, req *http.Request) {
 		generator.GetPageWriter().WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:   http.StatusOK,
-			AppError: "User signed out",
-			Messages: []interface{}{
-				"%s",
-				"Nothing to show",
-			},
+			Status:       http.StatusOK,
+			AppError:     "User signed out",
+			ButtonText:   "OK",
+			ButtonCancel: "-",
 		})
 	})
 
 	mux.HandleFunc("/delete", func(w http.ResponseWriter, req *http.Request) {
 		if user, found := req.Header[authRequestUserHeader]; found {
-			generator.DeleteCodeSpace(strings.ToLower(user[0]), w, req)
+			currentUser := strings.ToLower(user[0])
+
+			if req.Method == "GET" {
+				generator.ShouldDeleteCodeSpace(currentUser, w, req)
+			} else if req.Method == "POST" {
+				generator.DeleteCodeSpace(currentUser, w, req)
+			}
 		} else {
 			generator.RequestUserMissing(w, req)
 		}
