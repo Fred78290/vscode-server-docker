@@ -8,4 +8,5 @@ DEV_VSCODE_SERVER_REGISTRY=${DEV_VSCODE_SERVER_REGISTRY:=${VSCODE_SERVER_REGISTR
 IMAGE=${DEV_VSCODE_SERVER_REGISTRY}/vscode-server:v0.1.0
 
 docker rmi ${IMAGE}
-docker build --no-cache -t ${IMAGE} .
+docker build --no-cache --build-arg BASEIMAGE=${DEV_VSCODE_SERVER_REGISTRY}/vscode-container:v0.1.0 -t ${IMAGE} .
+docker push ${IMAGE}

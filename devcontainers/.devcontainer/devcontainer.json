@@ -33,6 +33,9 @@
             "additionalVersions": "8.1.14",
             "installComposer": "true"
         },
+        "ghcr.io/devcontainers/features/conda:1": {
+            "version": "latest"
+        },
         "ghcr.io/devcontainers/features/ruby:1": {
             "version": "3.1",
             "additionalVersions": "3.0"
@@ -66,6 +69,7 @@
             "version": "latest"
         },
         "ghcr.io/devcontainers/features/oryx:1": "latest",
+        "./local-features/vscode-server": "latest",
         "./local-features/setup-user": "latest"
     },
     "overrideFeatureInstallOrder": [
@@ -77,6 +81,7 @@
         "./local-features/nvs",
         "ghcr.io/devcontainers/features/python",
         "ghcr.io/devcontainers/features/php",
+        "ghcr.io/devcontainers/features/conda",
         "ghcr.io/devcontainers/features/ruby",
         "ghcr.io/devcontainers/features/java",
         "ghcr.io/devcontainers/features/sshd",
@@ -86,14 +91,16 @@
         "ghcr.io/devcontainers/features/kubectl-helm-minikube",
         "ghcr.io/devcontainers/features/go",
         "ghcr.io/devcontainers/features/oryx",
+        "./local-features/vscode-server",
         "./local-features/setup-user"
     ],
     "remoteUser": "codespace",
     "containerUser": "codespace",
-
     // Use 'forwardPorts' to make a list of ports inside the container available locally.
-    // "forwardPorts": [],
-
+    "forwardPorts": [
+        8000,
+        2222
+    ],
     // Configure tool-specific properties.
     "customizations": {
         // Configure properties specific to VS Code.

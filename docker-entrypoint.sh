@@ -6,43 +6,15 @@ set -o pipefail -o nounset
 
 : "${VSCODE_KEYRING_PASS:?Variable not set or empty}"
 
-ARGS="$@"
+ARGS="serve-local --accept-server-license-terms --without-connection-token --host 0.0.0.0"
 
-echo $ARGS
-
-if [ -z "$ARGS" ]; then
-	ARGS="serve-local --accept-server-license-terms --without-connection-token --host 0.0.0.0"
-fi
+source /lib/lsb/init-functions
 
 entrypoint_log() {
     if [ -z "${NGINX_ENTRYPOINT_QUIET_LOGS:-}" ]; then
         echo "$@"
     fi
 }
-
-function change_user() {
-	local RUNNING_USER=$1
-	local USER_ID=$2
-	local GROUP_ID=$3
-
-	mkdir -p /home/${RUNNING_USER}
-	chown ${USER_ID}:${GROUP_ID} /home/${RUNNING_USER}
-
-	echo "${RUNNING_USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${RUNNING_USER}
-
-	for FILE in /etc/passwd /etc/shadow /etc/group /etc/gshadow /etc/subgid /etc/subuid
-	do
-		sed -i "s/vscode-user/${RUNNING_USER}/g" $FILE
-	done
-}
-
-# Create user at fly
-if [ ! -f /etc/sudoers.d/${VSCODE_RUNNING_USER} ]; then
-	ls -ln /home
-	sudo bash -c "$(declare -f change_user); change_user ${VSCODE_RUNNING_USER} ${USER_ID} ${GROUP_ID}"
-
-	export HOME=/home/${VSCODE_RUNNING_USER}  
-fi
 
 if /usr/bin/find "/docker-entrypoint.d/" -mindepth 1 -maxdepth 1 -type f -print -quit 2>/dev/null | read v; then
 	entrypoint_log "$0: /docker-entrypoint.d/ is not empty, will attempt to perform configuration"
@@ -77,5 +49,7 @@ else
 	entrypoint_log "$0: No files found in /docker-entrypoint.d/, skipping configuration"
 fi
 
-#sudo -u ${VSCODE_RUNNING_USER} sh -c "exec dbus-run-session -- sh -c '(echo $VSCODE_KEYRING_PASS | gnome-keyring-daemon --unlock) && code-server ${ARGS}'"
-exec dbus-run-session -- sh -c "(echo $VSCODE_KEYRING_PASS | gnome-keyring-daemon --unlock) && code-server ${ARGS}"
+start-stop-daemon --start --quiet --oknodo --chuid ${USER_ID}:${GROUP_ID} --pidfile /tmp/vscode.pid --exec /usr/local/bin/vscode.sh -- $ARGS
+
+set +e
+exec "$@"

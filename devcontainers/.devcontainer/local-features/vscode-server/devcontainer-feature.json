@@ -1,0 +1,14 @@
+{
+    "id": "setup-vscode-server",
+    "name": "Install vscode-server",
+    "containerEnv": {
+        "VSCODE_SERVER_DATA_DIR": "/home/codespace/.vscode-remote"
+    },
+    "capAdd": [
+        "IPC_LOCK"
+    ],
+    "install": {
+        "app": "",
+        "file": "install.sh"
+    }
+}

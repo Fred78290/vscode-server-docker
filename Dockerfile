@@ -1,20 +1,16 @@
-FROM ubuntu:jammy
+ARG BASEIMAGE=fred78290/vscode-container:v0.1.0
+
+FROM $BASEIMAGE
 LABEL NAME fred78290/vscode-server
 
-ENV VSCODE_USER=vscode-user
-ENV VSCODE_RUNNING_USER=vscode-user
+ENV VSCODE_USER=codespace
+ENV VSCODE_RUNNING_USER=codespace
 ENV USER_ID=1000
 ENV GROUP_ID=1000
 
-ENV TINI_VERSION=v0.19.0
-ENV DOCKER_VERSION=23.0.3
-ENV NODE_VERSION=19.9.0
-ENV YARN_VERSION=1.22.19
-ENV GOLANG_VERSION=1.20.3
+VOLUME /workspaces
 
-ENV PATH /usr/local/go/bin:/usr/local/yarn/bin:$PATH
-
-EXPOSE 8000
+EXPOSE 8000 2222
 
 ADD docker-entrypoint.d /docker-entrypoint.d
 ADD docker-entrypoint.sh /docker-entrypoint.sh
@@ -24,5 +20,5 @@ RUN /prepare.sh && rm /prepare.sh
 
 USER $USER_ID:$GROUP_ID
 
-ENTRYPOINT ["/usr/local/bin/tini", "--"]
-CMD [ "/docker-entrypoint.sh" ]
+ENTRYPOINT ["/usr/bin/tini", "--" ]
+CMD [ "/usr/local/share/docker-init.sh", "/usr/local/share/ssh-init.sh", "/docker-entrypoint.sh", "sleep", "infinity" ]
