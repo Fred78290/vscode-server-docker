@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/Fred78290/vscode-server-helper/client"
 	"github.com/Fred78290/vscode-server-helper/pagewriter"
@@ -13,65 +12,84 @@ import (
 	glog "github.com/sirupsen/logrus"
 )
 
-const authRequestUserHeader = "X-Auth-Request-User"
-
 var phVersion = "v0.0.0-unset"
 var phBuildDate = ""
+
+func serveRobots(generator types.ClientGenerator, w http.ResponseWriter, req *http.Request) {
+	generator.GetPageWriter().WriteRobotsTxt(w, req)
+}
+
+func serveEcho(generator types.ClientGenerator, w http.ResponseWriter, req *http.Request) {
+	generator.GetPageWriter().WriteErrorPage(w, pagewriter.ErrorPageOpts{
+		Status:       http.StatusOK,
+		AppError:     "Echo",
+		ButtonText:   "OK",
+		ButtonCancel: "-",
+	})
+}
+
+func serveLogout(generator types.ClientGenerator, w http.ResponseWriter, req *http.Request) {
+	generator.GetPageWriter().WriteErrorPage(w, pagewriter.ErrorPageOpts{
+		Status:       http.StatusOK,
+		AppError:     "User signed out",
+		ButtonText:   "OK",
+		ButtonCancel: "-",
+	})
+}
+
+func route(cfg *types.Config) *http.ServeMux {
+	mux := http.NewServeMux()
+	generator := client.NewClientGenerator(cfg)
+
+	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, req *http.Request) {
+		serveRobots(generator, w, req)
+	})
+
+	mux.HandleFunc("/echo", func(w http.ResponseWriter, req *http.Request) {
+		serveEcho(generator, w, req)
+	})
+
+	mux.HandleFunc("/logout", func(w http.ResponseWriter, req *http.Request) {
+		serveLogout(generator, w, req)
+	})
+
+	mux.HandleFunc("/delete", func(w http.ResponseWriter, req *http.Request) {
+		generator.ClientDeleteCodeSpace(w, req)
+	})
+
+	mux.HandleFunc("/create", func(w http.ResponseWriter, req *http.Request) {
+		generator.ClientCreateCodeSpace(w, req)
+	})
+
+	mux.HandleFunc("/api/create", func(w http.ResponseWriter, req *http.Request) {
+		generator.CreateCodeSpace(w, req)
+	})
+
+	mux.HandleFunc("/api/delete", func(w http.ResponseWriter, req *http.Request) {
+		generator.DeleteCodeSpace(w, req)
+	})
+
+	mux.HandleFunc("/api/exists", func(w http.ResponseWriter, req *http.Request) {
+		generator.CodeSpaceExists(w, req)
+	})
+
+	mux.HandleFunc("/api/ready", func(w http.ResponseWriter, req *http.Request) {
+		generator.CodeSpaceReady(w, req)
+	})
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+		generator.ClientShouldCreateCodeSpace(w, req)
+	})
+
+	return mux
+}
 
 func serve(cfg *types.Config) error {
 	var err error
 
-	generator := client.NewClientGenerator(cfg)
-
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, req *http.Request) {
-		generator.GetPageWriter().WriteRobotsTxt(w, req)
-	})
-
-	mux.HandleFunc("/echo", func(w http.ResponseWriter, req *http.Request) {
-		generator.GetPageWriter().WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:       http.StatusOK,
-			AppError:     "Echo",
-			ButtonText:   "OK",
-			ButtonCancel: "-",
-		})
-	})
-
-	mux.HandleFunc("/logout", func(w http.ResponseWriter, req *http.Request) {
-		generator.GetPageWriter().WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:       http.StatusOK,
-			AppError:     "User signed out",
-			ButtonText:   "OK",
-			ButtonCancel: "-",
-		})
-	})
-
-	mux.HandleFunc("/delete", func(w http.ResponseWriter, req *http.Request) {
-		if user, found := req.Header[authRequestUserHeader]; found {
-			currentUser := strings.ToLower(user[0])
-
-			if req.Method == "GET" {
-				generator.ShouldDeleteCodeSpace(currentUser, w, req)
-			} else if req.Method == "POST" {
-				generator.DeleteCodeSpace(currentUser, w, req)
-			}
-		} else {
-			generator.RequestUserMissing(w, req)
-		}
-	})
-
-	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		if user, found := req.Header[authRequestUserHeader]; found {
-			generator.CreateCodeSpace(strings.ToLower(user[0]), w, req)
-		} else {
-			generator.RequestUserMissing(w, req)
-		}
-	})
-
 	srv := &http.Server{
 		Addr:    cfg.Listen,
-		Handler: mux,
+		Handler: route(cfg),
 	}
 
 	if cfg.UseTls {

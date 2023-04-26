@@ -16,6 +16,7 @@ type Config struct {
 	KubeConfig             string
 	APIServerURL           string
 	VSCodeIngressTlsSecret string
+	VSCodeIngressSshSecret string
 	VSCodeHostname         string
 	VSCodeTemplatePath     string
 	VSCodeServerNameSpace  string
@@ -57,6 +58,7 @@ func NewConfig(version string) *Config {
 		Listen:                 "0.0.0.0:8000",
 		VSCodeHostname:         "localhost",
 		VSCodeIngressTlsSecret: "vscode-server-ingress-tls",
+		VSCodeIngressSshSecret: "vscode-server-sshd",
 		VSCodeTemplatePath:     "/vscode-server-helper/template.yaml",
 		VSCodeServerNameSpace:  "vscode-server",
 		VSCodeAppName:          "vscode-server",
@@ -107,6 +109,7 @@ func (cfg *Config) ParseFlags(args []string, version string) error {
 	app.Flag("redirect-url", "redirect url if host is different of caller").Default(cfg.RedirectURL).StringVar(&cfg.RedirectURL)
 
 	app.Flag("vscode-ingress-secret-tls", "the ingress tls used for vscode-server").Default(cfg.VSCodeIngressTlsSecret).StringVar(&cfg.VSCodeIngressTlsSecret)
+	app.Flag("vscode-secret-ssh", "the ssh key used for vscode-server").Default(cfg.VSCodeIngressSshSecret).StringVar(&cfg.VSCodeIngressSshSecret)
 	app.Flag("vscode-namespace", "the name space of vscode-server").Default(cfg.VSCodeServerNameSpace).StringVar(&cfg.VSCodeServerNameSpace)
 	app.Flag("vscode-app-name", "the deployment and ingress name of vscode-server").Default(cfg.VSCodeAppName).StringVar(&cfg.VSCodeAppName)
 	app.Flag("vscode-template-file", "the template used to create vscode-server").Default(cfg.VSCodeTemplatePath).StringVar(&cfg.VSCodeTemplatePath)

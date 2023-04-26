@@ -112,6 +112,46 @@ func NewClientGenerator(cfg *types.Config) types.ClientGenerator {
 	return nil
 }
 
+func getRequestUser(req *http.Request) (string, bool) {
+	if user, found := req.Header[types.AuthRequestUserHeader]; found {
+		return strings.ToLower(user[0]), true
+	}
+
+	return "", false
+}
+func serveMissingUser(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusNotFound)
+	w.Write([]byte(utils.ToJSON(&ErrorResponse{
+		Status: -1,
+		Error: ErrorObject{
+			Code:   http.StatusNotFound,
+			Reason: "Missing X-Auth-Request-User",
+		},
+	})))
+}
+
+func serveUserNotFound(w http.ResponseWriter, userName string) {
+	w.WriteHeader(http.StatusNotFound)
+	w.Write([]byte(utils.ToJSON(&ErrorResponse{
+		Status: -1,
+		Error: ErrorObject{
+			Code:   http.StatusNotFound,
+			Reason: fmt.Sprintf("User %s not found", userName),
+		},
+	})))
+}
+
+func serveError(w http.ResponseWriter, err error) {
+	w.WriteHeader(http.StatusInternalServerError)
+	w.Write([]byte(utils.ToJSON(&ErrorResponse{
+		Status: -1,
+		Error: ErrorObject{
+			Code:   http.StatusInternalServerError,
+			Reason: err.Error(),
+		},
+	})))
+}
+
 // getRestConfig returns the rest clients config to get automatically
 // data if you run inside a cluster or by passing flags.
 func getRestConfig(kubeConfig, apiServerURL string) (*rest.Config, error) {
@@ -253,13 +293,6 @@ func (p *SingletonClientGenerator) codeSpaceExists(userName string) (bool, error
 	return true, nil
 }
 
-func (p *SingletonClientGenerator) CodeSpaceExists(userName string) (bool, error) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	return p.codeSpaceExists(userName)
-}
-
 func (p *SingletonClientGenerator) waitNameSpaceReady(ctx *context.Context, userName string) (bool, error) {
 	var ns *v1.Namespace
 
@@ -314,14 +347,14 @@ func (p *SingletonClientGenerator) saveTemplate(yaml string) (string, error) {
 	}
 }
 
-func (p *SingletonClientGenerator) waitDeploymentReady(ctx *context.Context, userName, name string) (bool, error) {
+func (p *SingletonClientGenerator) deploymentReady(userName, name string) (bool, error) {
 	var app *appv1.Deployment
 	kubeclient, err := p.KubeClient()
 
-	if err = utils.PollImmediate(time.Second, p.ObjectReadyTimeout, func() (bool, error) {
+	if err == nil {
 		apps := kubeclient.AppsV1().Deployments(userName)
 
-		if app, err = apps.Get(ctx, name, metav1.GetOptions{}); err == nil {
+		if app, err = apps.Get(context.Background(), name, metav1.GetOptions{}); err == nil {
 
 			for _, status := range app.Status.Conditions {
 				if status.Type == appv1.DeploymentAvailable {
@@ -339,15 +372,47 @@ func (p *SingletonClientGenerator) waitDeploymentReady(ctx *context.Context, use
 				}
 			}
 		}
-
-		return false, err
-	}); err != nil {
-		err = fmt.Errorf("app %s/%s is not ready, %v", userName, name, err)
-
-		return false, err
 	}
 
-	glog.Infof("The kubernetes app %s/%s is Ready", userName, name)
+	return false, err
+}
+
+func (p *SingletonClientGenerator) waitDeploymentReady(ctx *context.Context, userName, name string) (bool, error) {
+	var app *appv1.Deployment
+	kubeclient, err := p.KubeClient()
+
+	if err == nil {
+		if err = utils.PollImmediate(time.Second, p.ObjectReadyTimeout, func() (bool, error) {
+			apps := kubeclient.AppsV1().Deployments(userName)
+
+			if app, err = apps.Get(ctx, name, metav1.GetOptions{}); err == nil {
+
+				for _, status := range app.Status.Conditions {
+					if status.Type == appv1.DeploymentAvailable {
+
+						if b, e := strconv.ParseBool(string(status.Status)); e == nil {
+							if b {
+								glog.Debugf("app %s/%s marked ready with replicas=%d, read replicas=%d", userName, name, app.Status.Replicas, app.Status.ReadyReplicas)
+
+								return app.Status.Replicas == app.Status.ReadyReplicas, nil
+							}
+						}
+
+					} else if status.Type == appv1.DeploymentReplicaFailure {
+						return false, fmt.Errorf("app %s/%s replica failure: %v", userName, name, status.String())
+					}
+				}
+			}
+
+			return false, err
+		}); err != nil {
+			err = fmt.Errorf("app %s/%s is not ready, %v", userName, name, err)
+
+			return false, err
+		}
+
+		glog.Infof("The kubernetes app %s/%s is Ready", userName, name)
+	}
 
 	return true, err
 }
@@ -368,10 +433,11 @@ func (p *SingletonClientGenerator) waitAppReady(userName string) (bool, error) {
 
 }
 
-func (p *SingletonClientGenerator) getNameSpaceConfigMapAndSecretsAndTls(userName string) (string, string, string, error) {
+func (p *SingletonClientGenerator) getNameSpaceConfigMapAndSecretsAndTls(userName string) (string, string, string, string, error) {
 	var gotCM *v1.ConfigMap
 	var gotSecret *v1.Secret
 	var tls *v1.Secret
+	var ssh *v1.Secret
 	cm := &v1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "ConfigMap",
@@ -404,7 +470,7 @@ func (p *SingletonClientGenerator) getNameSpaceConfigMapAndSecretsAndTls(userNam
 	kubeclient, err := p.KubeClient()
 
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 
 	ctx := p.newRequestContext()
@@ -417,6 +483,28 @@ func (p *SingletonClientGenerator) getNameSpaceConfigMapAndSecretsAndTls(userNam
 
 		cm.Data = gotCM.Data
 		cm.BinaryData = gotCM.BinaryData
+	}
+
+	if gotSecret, err = kubeclient.CoreV1().Secrets(p.cfg.VSCodeServerNameSpace).Get(ctx, p.cfg.VSCodeIngressSshSecret, metav1.GetOptions{}); err != nil {
+		glog.Debugf("No secret %s/%s found, %v", p.cfg.VSCodeServerNameSpace, p.cfg.VSCodeIngressTlsSecret, err)
+	} else {
+		glog.Debugf("SSH %s/%s found", p.cfg.VSCodeServerNameSpace, p.cfg.VSCodeIngressTlsSecret)
+
+		ssh = &v1.Secret{
+			Type: "Opaque",
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "Secret",
+				APIVersion: "v1",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      p.cfg.VSCodeIngressTlsSecret,
+				Namespace: userName,
+				Labels: map[string]string{
+					appLabel: userName,
+				},
+			},
+			Data: gotSecret.Data,
+		}
 	}
 
 	if gotSecret, err = kubeclient.CoreV1().Secrets(p.cfg.VSCodeServerNameSpace).Get(ctx, p.cfg.VSCodeIngressTlsSecret, metav1.GetOptions{}); err != nil {
@@ -449,7 +537,7 @@ func (p *SingletonClientGenerator) getNameSpaceConfigMapAndSecretsAndTls(userNam
 		secret.Data = gotSecret.Data
 	}
 
-	return encodeToYaml(cm), encodeToYaml(secret), encodeToYaml(tls), nil
+	return encodeToYaml(cm), encodeToYaml(secret), encodeToYaml(ssh), encodeToYaml(tls), nil
 }
 
 func (p *SingletonClientGenerator) applyTemplate(yaml string) (err error) {
@@ -488,10 +576,10 @@ func (p *SingletonClientGenerator) createUserCodespace(userName string) error {
 	var template []byte
 	var err error
 	var yaml string
-	var configmap, secret, tls string
+	var configmap, secret, ssh, tls string
 	ready := false
 
-	if configmap, secret, tls, err = p.getNameSpaceConfigMapAndSecretsAndTls(userName); err != nil {
+	if configmap, secret, ssh, tls, err = p.getNameSpaceConfigMapAndSecretsAndTls(userName); err != nil {
 		glog.Errorf("Unable to get config map and secret for user: %s, %v", userName, err)
 		return err
 	}
@@ -512,6 +600,9 @@ func (p *SingletonClientGenerator) createUserCodespace(userName string) error {
 
 			case "ACCOUNT_SECRET":
 				return secret
+
+			case "ACCOUNT_SSSH_KEY":
+				return ssh
 
 			case "INGRESS_SECRET_TLS":
 				return tls
@@ -566,121 +657,327 @@ func (p *SingletonClientGenerator) createUserCodespace(userName string) error {
 	return err
 }
 
-func (p *SingletonClientGenerator) ShouldDeleteCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) {
-	var err error
-	var exists bool
+func (p *SingletonClientGenerator) CodeSpaceExists(w http.ResponseWriter, req *http.Request) {
 
-	if exists, err = p.CodeSpaceExists(currentUser); err != nil {
+	if currentUser, found := getRequestUser(req); found {
 
-		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:   http.StatusInternalServerError,
-			AppError: fmt.Sprintf(userNotFound, currentUser),
-			Messages: []interface{}{
-				errorPage,
-				err,
-			},
-		})
+		p.lock.Lock()
+		defer p.lock.Unlock()
 
-	} else if exists {
-
-		referer := req.Referer()
-
-		if referer == "" {
-			referer = "/"
+		if exist, err := p.codeSpaceExists(currentUser); err == nil {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(utils.ToJSON(&ExistsResponse{
+				Status: 0,
+				Result: ExistsObject{
+					Codespace: currentUser,
+					Exists:    exist,
+				},
+			})))
+		} else {
+			serveError(w, err)
 		}
-
-		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:       http.StatusOK,
-			RedirectURL:  referer,
-			AppError:     fmt.Sprintf("Delete user %s ?", currentUser),
-			ButtonText:   "Delete",
-			ButtonCancel: "Cancel",
-			ButtonAction: "/delete",
-			ButtonMethod: "POST",
-		})
-
 	} else {
-		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:   http.StatusNotFound,
-			AppError: fmt.Sprintf(userNotFound, currentUser),
-		})
+		serveMissingUser(w)
 	}
 }
 
-func (p *SingletonClientGenerator) DeleteCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) {
-	var err error
-	var exists bool
+func (p *SingletonClientGenerator) CreateCodeSpace(w http.ResponseWriter, req *http.Request) {
+	if currentUser, found := getRequestUser(req); found {
 
-	if exists, err = p.CodeSpaceExists(currentUser); err != nil {
+		p.lock.Lock()
+		defer p.lock.Unlock()
 
-		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:   http.StatusInternalServerError,
-			AppError: fmt.Sprintf(userNotFound, currentUser),
-			Messages: []interface{}{
-				errorPage,
-				err,
-			},
-		})
+		if exist, err := p.codeSpaceExists(currentUser); err == nil {
+			if !exist {
+				if err = p.createUserCodespace(currentUser); err != nil {
+					serveError(w, err)
+					return
+				}
+			}
 
-	} else if exists {
+			domain := cookies.GetCookieDomain(req, p.cfg.VSCodeCookieDomain)
 
-		if err = p.deleteUserCodespace(currentUser); err == nil {
-			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-				Status:       http.StatusOK,
-				RedirectURL:  p.cfg.VSCodeSignoutURL,
-				AppError:     fmt.Sprintf("User %s deleted", currentUser),
-				ButtonText:   "Sign out",
-				ButtonCancel: "-",
-				ButtonAction: p.cfg.VSCodeSignoutURL,
+			// If nothing matches, create the cookie with the shortest domain
+			if domain == "" && len(p.cfg.VSCodeCookieDomain) > 0 {
+				glog.Errorf("Warning: request host %q did not match any of the specific cookie domains of %q",
+					requestutil.GetRequestHost(req),
+					strings.Join(p.cfg.VSCodeCookieDomain, ","),
+				)
+				domain = p.cfg.VSCodeCookieDomain[len(p.cfg.VSCodeCookieDomain)-1]
+			}
+
+			http.SetCookie(w, &http.Cookie{
+				Name:   "vscode_user",
+				Domain: domain,
+				Value:  currentUser,
 			})
 
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(utils.ToJSON(&ExistsResponse{
+				Status: 0,
+				Result: ExistsObject{
+					Codespace: currentUser,
+					Exists:    exist,
+				},
+			})))
+
 		} else {
+			serveError(w, err)
+		}
+	} else {
+		serveMissingUser(w)
+	}
+}
+
+func (p *SingletonClientGenerator) DeleteCodeSpace(w http.ResponseWriter, req *http.Request) {
+	if currentUser, found := getRequestUser(req); found {
+
+		var err error
+		var exists bool
+
+		p.lock.Lock()
+		defer p.lock.Unlock()
+
+		if exists, err = p.codeSpaceExists(currentUser); err == nil {
+
+			if exists {
+				if err := p.deleteUserCodespace(currentUser); err == nil {
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(utils.ToJSON(&DeletedResponse{
+						Status: 0,
+						Result: DeletedObject{
+							Codespace: currentUser,
+							Deleted:   true,
+						},
+					})))
+				} else {
+					serveError(w, err)
+				}
+			} else {
+				serveUserNotFound(w, currentUser)
+			}
+
+		} else {
+			serveError(w, err)
+		}
+	} else {
+		serveMissingUser(w)
+	}
+}
+
+func (p *SingletonClientGenerator) CodeSpaceReady(w http.ResponseWriter, req *http.Request) {
+
+	if currentUser, found := getRequestUser(req); found {
+
+		p.lock.Lock()
+		defer p.lock.Unlock()
+
+		if exist, err := p.codeSpaceExists(currentUser); err == nil {
+			if exist {
+
+				if ready, err := p.deploymentReady(currentUser, p.cfg.VSCodeAppName); err == nil {
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(utils.ToJSON(&ReadyResponse{
+						Status: 0,
+						Result: ReadyObject{
+							Codespace: currentUser,
+							Ready:     ready,
+						},
+					})))
+				} else {
+					serveError(w, err)
+				}
+
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte(utils.ToJSON(&ErrorResponse{
+					Status: -1,
+					Error: ErrorObject{
+						Code:   http.StatusNotFound,
+						Reason: err.Error(),
+					},
+				})))
+			}
+		} else {
+			serveError(w, err)
+		}
+	} else {
+		serveMissingUser(w)
+	}
+}
+
+func (p *SingletonClientGenerator) ClientShouldCreateCodeSpace(w http.ResponseWriter, req *http.Request) {
+	if currentUser, found := getRequestUser(req); found {
+		var err error
+		var exists bool
+
+		p.lock.Lock()
+		defer p.lock.Unlock()
+
+		if exists, err = p.codeSpaceExists(currentUser); err != nil {
 			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
 				Status:   http.StatusInternalServerError,
-				AppError: fmt.Sprintf("Unable to delete user: %s", currentUser),
+				AppError: fmt.Sprintf(userNotFound, currentUser),
 				Messages: []interface{}{
 					errorPage,
 					err,
 				},
 			})
-		}
+		} else if exists {
+			var redirect *url.URL
 
+			if p.cfg.RedirectURL != "" {
+				redirect, _ = url.Parse(fmt.Sprintf(p.cfg.RedirectURL, currentUser, currentUser))
+			} else {
+				redirect = &url.URL{
+					Host:   requestutil.GetRequestHost(req),
+					Scheme: requestutil.GetRequestProto(req),
+					Path:   fmt.Sprintf("/%s?folder=/workspace", currentUser),
+				}
+			}
+
+			http.Redirect(w, req, redirect.String(), http.StatusTemporaryRedirect)
+		} else {
+			referer := req.Referer()
+
+			if referer == "" {
+				referer = "/"
+			}
+
+			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+				Status:       http.StatusOK,
+				RedirectURL:  referer,
+				AppError:     fmt.Sprintf("Create codespace for user %s ?", currentUser),
+				ButtonText:   "Create",
+				ButtonCancel: "Cancel",
+				ButtonAction: "/create",
+				ButtonMethod: "GET",
+			})
+		}
 	} else {
-		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:   http.StatusNotFound,
-			AppError: fmt.Sprintf(userNotFound, currentUser),
-		})
+		p.ClientRequestUserMissing(w)
 	}
 }
 
-func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.ResponseWriter, req *http.Request) {
+// ClientDeleteCodeSpace HTML action do ask should delete codespace
+func (p *SingletonClientGenerator) ClientShouldDeleteCodeSpace(w http.ResponseWriter, req *http.Request) {
+	if currentUser, found := getRequestUser(req); found {
+		var err error
+		var exists bool
+
+		p.lock.Lock()
+		defer p.lock.Unlock()
+
+		if exists, err = p.codeSpaceExists(currentUser); err != nil {
+
+			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+				Status:   http.StatusInternalServerError,
+				AppError: fmt.Sprintf(userNotFound, currentUser),
+				Messages: []interface{}{
+					errorPage,
+					err,
+				},
+			})
+
+		} else if exists {
+
+			referer := req.Referer()
+
+			if referer == "" {
+				referer = "/"
+			}
+
+			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+				Status:       http.StatusOK,
+				RedirectURL:  referer,
+				AppError:     fmt.Sprintf("Delete user %s ?", currentUser),
+				ButtonText:   "Delete",
+				ButtonCancel: "Cancel",
+				ButtonAction: "/delete",
+				ButtonMethod: "POST",
+			})
+
+		} else {
+			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+				Status:   http.StatusNotFound,
+				AppError: fmt.Sprintf(userNotFound, currentUser),
+			})
+		}
+	} else {
+		p.ClientRequestUserMissing(w)
+	}
+}
+
+// ClientDeleteCodeSpace HTML action do delete codespace
+func (p *SingletonClientGenerator) ClientDeleteCodeSpace(w http.ResponseWriter, req *http.Request) {
+	if currentUser, found := getRequestUser(req); found {
+		var err error
+		var exists bool
+
+		p.lock.Lock()
+		defer p.lock.Unlock()
+
+		if exists, err = p.codeSpaceExists(currentUser); err != nil {
+
+			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+				Status:   http.StatusInternalServerError,
+				AppError: fmt.Sprintf(userNotFound, currentUser),
+				Messages: []interface{}{
+					errorPage,
+					err,
+				},
+			})
+
+		} else if exists {
+
+			if err = p.deleteUserCodespace(currentUser); err == nil {
+				p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+					Status:       http.StatusOK,
+					RedirectURL:  p.cfg.VSCodeSignoutURL,
+					AppError:     fmt.Sprintf("User %s deleted", currentUser),
+					ButtonText:   "Sign out",
+					ButtonCancel: "-",
+					ButtonAction: p.cfg.VSCodeSignoutURL,
+				})
+
+			} else {
+				p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+					Status:   http.StatusInternalServerError,
+					AppError: fmt.Sprintf("Unable to delete user: %s", currentUser),
+					Messages: []interface{}{
+						errorPage,
+						err,
+					},
+				})
+			}
+
+		} else {
+			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+				Status:   http.StatusNotFound,
+				AppError: fmt.Sprintf(userNotFound, currentUser),
+			})
+		}
+	} else {
+		p.ClientRequestUserMissing(w)
+	}
+}
+
+// ClientCreateCodeSpace HTML action do create codespace
+func (p *SingletonClientGenerator) ClientCreateCodeSpace(w http.ResponseWriter, req *http.Request) {
 	var err error
 	var exists bool
 	var redirect *url.URL
 
-	p.lock.Lock()
-	defer p.lock.Unlock()
+	if currentUser, found := getRequestUser(req); found {
 
-	if exists, err = p.codeSpaceExists(currentUser); err != nil {
+		p.lock.Lock()
+		defer p.lock.Unlock()
 
-		p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
-			Status:   http.StatusInternalServerError,
-			AppError: fmt.Sprintf(userNotFound, currentUser),
-			Messages: []interface{}{
-				errorPage,
-				err,
-			},
-		})
+		if exists, err = p.codeSpaceExists(currentUser); err != nil {
 
-		return
-	}
-
-	if !exists {
-
-		if err = p.createUserCodespace(currentUser); err != nil {
 			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
 				Status:   http.StatusInternalServerError,
-				AppError: fmt.Sprintf("Could not create codespace for user: %s", currentUser),
+				AppError: fmt.Sprintf(userNotFound, currentUser),
 				Messages: []interface{}{
 					errorPage,
 					err,
@@ -690,39 +987,58 @@ func (p *SingletonClientGenerator) CreateCodeSpace(currentUser string, w http.Re
 			return
 		}
 
-	}
+		if !exists {
 
-	domain := cookies.GetCookieDomain(req, p.cfg.VSCodeCookieDomain)
+			if err = p.createUserCodespace(currentUser); err != nil {
+				p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
+					Status:   http.StatusInternalServerError,
+					AppError: fmt.Sprintf("Could not create codespace for user: %s", currentUser),
+					Messages: []interface{}{
+						errorPage,
+						err,
+					},
+				})
 
-	// If nothing matches, create the cookie with the shortest domain
-	if domain == "" && len(p.cfg.VSCodeCookieDomain) > 0 {
-		glog.Errorf("Warning: request host %q did not match any of the specific cookie domains of %q",
-			requestutil.GetRequestHost(req),
-			strings.Join(p.cfg.VSCodeCookieDomain, ","),
-		)
-		domain = p.cfg.VSCodeCookieDomain[len(p.cfg.VSCodeCookieDomain)-1]
-	}
+				return
+			}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:   "vscode_user",
-		Domain: domain,
-		Value:  currentUser,
-	})
-
-	if p.cfg.RedirectURL != "" {
-		redirect, _ = url.Parse(fmt.Sprintf(p.cfg.RedirectURL, currentUser, currentUser))
-	} else {
-		redirect = &url.URL{
-			Host:   requestutil.GetRequestHost(req),
-			Scheme: requestutil.GetRequestProto(req),
-			Path:   fmt.Sprintf("/%s?folder=/home/%s/sources", currentUser, currentUser),
 		}
-	}
 
-	http.Redirect(w, req, redirect.String(), http.StatusTemporaryRedirect)
+		domain := cookies.GetCookieDomain(req, p.cfg.VSCodeCookieDomain)
+
+		// If nothing matches, create the cookie with the shortest domain
+		if domain == "" && len(p.cfg.VSCodeCookieDomain) > 0 {
+			glog.Errorf("Warning: request host %q did not match any of the specific cookie domains of %q",
+				requestutil.GetRequestHost(req),
+				strings.Join(p.cfg.VSCodeCookieDomain, ","),
+			)
+			domain = p.cfg.VSCodeCookieDomain[len(p.cfg.VSCodeCookieDomain)-1]
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:   "vscode_user",
+			Domain: domain,
+			Value:  currentUser,
+		})
+
+		if p.cfg.RedirectURL != "" {
+			redirect, _ = url.Parse(fmt.Sprintf(p.cfg.RedirectURL, currentUser, currentUser))
+		} else {
+			redirect = &url.URL{
+				Host:   requestutil.GetRequestHost(req),
+				Scheme: requestutil.GetRequestProto(req),
+				Path:   fmt.Sprintf("/%s?folder=/workspace", currentUser, currentUser),
+			}
+		}
+
+		http.Redirect(w, req, redirect.String(), http.StatusTemporaryRedirect)
+	} else {
+		p.ClientRequestUserMissing(w)
+	}
 }
 
-func (p *SingletonClientGenerator) RequestUserMissing(w http.ResponseWriter, req *http.Request) {
+// ClientCreateCodeSpace HTML action do report missing http header
+func (p *SingletonClientGenerator) ClientRequestUserMissing(w http.ResponseWriter) {
 	p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
 		Status:   http.StatusPreconditionRequired,
 		AppError: "Missing header: X-Auth-Request-User",

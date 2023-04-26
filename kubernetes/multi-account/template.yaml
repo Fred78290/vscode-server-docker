@@ -79,8 +79,28 @@ spec:
           ports:
             - containerPort: 8000
               name: http
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 60
+            failureThreshold: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 5
+            failureThreshold: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
           volumeMounts:
-            - mountPath: /home
+            - mountPath: /home/codespace/.ssh
+              name: vscode-server-sshd
+              readOnly: true
+            - mountPath: /home/codespace/.vscode-remote
+              name: vscode-server-volume
+              subPath: vscode-server-remote
+            - mountPath: /workspace
               name: vscode-server-volume
               subPath: vscode-server-home
             - mountPath: /certs
@@ -106,6 +126,10 @@ spec:
       volumes:
         - name: docker-graph-run
           emptyDir: {}
+        - name: vscode-server-sshd
+          secret:
+            secretName: vscode-server-sshd
+            optional: true
         - name: vscode-server-volume
           persistentVolumeClaim:
             claimName: pvc-vscode-server-${ACCOUNT_NAMESPACE}
@@ -201,5 +225,7 @@ spec:
 ${ACCOUNT_CONFIGMAP}
 ---
 ${ACCOUNT_SECRET}
+---
+${ACCOUNT_SSSH_KEY}
 ---
 ${INGRESS_SECRET_TLS}
