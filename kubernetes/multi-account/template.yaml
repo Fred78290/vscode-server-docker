@@ -88,6 +88,9 @@ spec:
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
+            capabilities:
+              add:
+                - IPC_LOCK
           ports:
             - containerPort: 8000
               name: http

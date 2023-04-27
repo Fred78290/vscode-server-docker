@@ -412,6 +412,9 @@ func (p *vscodeClientGenerator) saveTemplate(yaml string) (string, error) {
 
 func (p *vscodeClientGenerator) deploymentReady(client *vscodeClient, name string) (bool, error) {
 	var app *appv1.Deployment
+	var pods *v1.PodList
+	var startFailure = "app %s/%s start failure: %v"
+
 	kubeclient, err := p.KubeClient()
 
 	if err == nil {
@@ -420,7 +423,25 @@ func (p *vscodeClientGenerator) deploymentReady(client *vscodeClient, name strin
 		if app, err = apps.Get(context.Background(), name, metav1.GetOptions{}); err == nil {
 
 			for _, status := range app.Status.Conditions {
-				if status.Type == appv1.DeploymentAvailable {
+				if status.Type == appv1.DeploymentProgressing {
+					if pods, err = kubeclient.CoreV1().Pods(client.Name).List(context.Background(), metav1.ListOptions{LabelSelector: fmt.Sprintf("app.kubernetes.io/name=%s", p.cfg.VSCodeAppName)}); err == nil {
+						for _, pod := range pods.Items {
+							if pod.Status.Phase == v1.PodFailed {
+								glog.Errorf(startFailure, client.Name, name, pod.Status.Message)
+
+								return false, fmt.Errorf(startFailure, client.Name, name, pod.Status.Message)
+							}
+
+							for _, containerStatus := range pod.Status.ContainerStatuses {
+								if !containerStatus.Ready && containerStatus.RestartCount > 4 {
+									glog.Errorf(startFailure, client.Name, name, pod.Status.Message)
+
+									return false, fmt.Errorf(startFailure, client.Name, name, pod.Status.Message)
+								}
+							}
+						}
+					}
+				} else if status.Type == appv1.DeploymentAvailable {
 
 					if b, e := strconv.ParseBool(string(status.Status)); e == nil {
 						if b {
@@ -441,43 +462,18 @@ func (p *vscodeClientGenerator) deploymentReady(client *vscodeClient, name strin
 }
 
 func (p *vscodeClientGenerator) waitDeploymentReady(ctx *context.Context, client *vscodeClient, name string) (bool, error) {
-	var app *appv1.Deployment
-	kubeclient, err := p.KubeClient()
 
-	if err == nil {
-		if err = utils.PollImmediate(time.Second, p.ObjectReadyTimeout, func() (bool, error) {
-			apps := kubeclient.AppsV1().Deployments(client.Name)
+	if err := utils.PollImmediate(time.Second, p.ObjectReadyTimeout, func() (bool, error) {
+		return p.deploymentReady(client, name)
+	}); err != nil {
+		err = fmt.Errorf("app %s/%s is not ready, %v", client.Name, name, err)
 
-			if app, err = apps.Get(ctx, name, metav1.GetOptions{}); err == nil {
-
-				for _, status := range app.Status.Conditions {
-					if status.Type == appv1.DeploymentAvailable {
-
-						if b, e := strconv.ParseBool(string(status.Status)); e == nil {
-							if b {
-								glog.Debugf("app %s/%s marked ready with replicas=%d, read replicas=%d", client.Name, name, app.Status.Replicas, app.Status.ReadyReplicas)
-
-								return app.Status.Replicas == app.Status.ReadyReplicas, nil
-							}
-						}
-
-					} else if status.Type == appv1.DeploymentReplicaFailure {
-						return false, fmt.Errorf("app %s/%s replica failure: %v", client.Name, name, status.String())
-					}
-				}
-			}
-
-			return false, err
-		}); err != nil {
-			err = fmt.Errorf("app %s/%s is not ready, %v", client.Name, name, err)
-
-			return false, err
-		}
-
-		glog.Infof("The kubernetes app %s/%s is Ready", client.Name, name)
+		return false, err
 	}
 
-	return true, err
+	glog.Infof("The kubernetes app %s/%s is Ready", client.Name, name)
+
+	return true, nil
 }
 
 func (p *vscodeClientGenerator) waitAppReady(client *vscodeClient) (bool, error) {
@@ -937,19 +933,7 @@ func (p *vscodeClientGenerator) ClientShouldCreateCodeSpace(w http.ResponseWrite
 				},
 			})
 		} else if exists {
-			var redirect *url.URL
-
-			if p.cfg.RedirectURL != "" {
-				redirect, _ = url.Parse(fmt.Sprintf(p.cfg.RedirectURL, currentUser, currentUser))
-			} else {
-				redirect = &url.URL{
-					Host:   requestutil.GetRequestHost(req),
-					Scheme: requestutil.GetRequestProto(req),
-					Path:   fmt.Sprintf("/%s?folder=/workspace", currentUser.Name),
-				}
-			}
-
-			http.Redirect(w, req, redirect.String(), http.StatusTemporaryRedirect)
+			p.codeSpaceCreated(currentUser, w, req)
 		} else {
 			referer := req.Referer()
 
@@ -1074,6 +1058,43 @@ func (p *vscodeClientGenerator) ClientDeleteCodeSpace(w http.ResponseWriter, req
 	}
 }
 
+func (p *vscodeClientGenerator) codeSpaceCookie(currentUser *vscodeClient, w http.ResponseWriter, req *http.Request) {
+	domain := cookies.GetCookieDomain(req, p.cfg.VSCodeCookieDomain)
+
+	// If nothing matches, create the cookie with the shortest domain
+	if domain == "" && len(p.cfg.VSCodeCookieDomain) > 0 {
+		glog.Errorf("Warning: request host %q did not match any of the specific cookie domains of %q",
+			requestutil.GetRequestHost(req),
+			strings.Join(p.cfg.VSCodeCookieDomain, ","),
+		)
+		domain = p.cfg.VSCodeCookieDomain[len(p.cfg.VSCodeCookieDomain)-1]
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:   "vscode_user",
+		Domain: domain,
+		Value:  currentUser.Name,
+	})
+}
+
+func (p *vscodeClientGenerator) codeSpaceCreated(currentUser *vscodeClient, w http.ResponseWriter, req *http.Request) {
+	var redirect *url.URL
+
+	p.codeSpaceCookie(currentUser, w, req)
+
+	if p.cfg.RedirectURL != "" {
+		redirect, _ = url.Parse(fmt.Sprintf(p.cfg.RedirectURL, currentUser, currentUser))
+	} else {
+		redirect = &url.URL{
+			Host:   requestutil.GetRequestHost(req),
+			Scheme: requestutil.GetRequestProto(req),
+			Path:   fmt.Sprintf("/%s?folder=/workspace", currentUser.Name),
+		}
+	}
+
+	http.Redirect(w, req, redirect.String(), http.StatusTemporaryRedirect)
+}
+
 // ClientCreateCodeSpace HTML action do create codespace
 func (p *vscodeClientGenerator) ClientCreateCodeSpace(w http.ResponseWriter, req *http.Request) {
 	var err error
@@ -1081,43 +1102,6 @@ func (p *vscodeClientGenerator) ClientCreateCodeSpace(w http.ResponseWriter, req
 
 	if currentUser, found := p.getRequestUser(req); found {
 		defer currentUser.lock()
-
-		codeSpaceCookie := func() {
-			domain := cookies.GetCookieDomain(req, p.cfg.VSCodeCookieDomain)
-
-			// If nothing matches, create the cookie with the shortest domain
-			if domain == "" && len(p.cfg.VSCodeCookieDomain) > 0 {
-				glog.Errorf("Warning: request host %q did not match any of the specific cookie domains of %q",
-					requestutil.GetRequestHost(req),
-					strings.Join(p.cfg.VSCodeCookieDomain, ","),
-				)
-				domain = p.cfg.VSCodeCookieDomain[len(p.cfg.VSCodeCookieDomain)-1]
-			}
-
-			http.SetCookie(w, &http.Cookie{
-				Name:   "vscode_user",
-				Domain: domain,
-				Value:  currentUser.Name,
-			})
-		}
-
-		codespaceCreated := func() {
-			var redirect *url.URL
-
-			codeSpaceCookie()
-
-			if p.cfg.RedirectURL != "" {
-				redirect, _ = url.Parse(fmt.Sprintf(p.cfg.RedirectURL, currentUser, currentUser))
-			} else {
-				redirect = &url.URL{
-					Host:   requestutil.GetRequestHost(req),
-					Scheme: requestutil.GetRequestProto(req),
-					Path:   fmt.Sprintf("/%s?folder=/workspace", currentUser.Name),
-				}
-			}
-
-			http.Redirect(w, req, redirect.String(), http.StatusTemporaryRedirect)
-		}
 
 		if currentUser.Status == clientStatusNone {
 			if exists, err = p.codeSpaceExists(currentUser); err != nil {
@@ -1151,9 +1135,9 @@ func (p *vscodeClientGenerator) ClientCreateCodeSpace(w http.ResponseWriter, req
 
 			}
 
-			codespaceCreated()
+			p.codeSpaceCreated(currentUser, w, req)
 		} else if currentUser.Status == clientStatusCreated {
-			codespaceCreated()
+			p.codeSpaceCreated(currentUser, w, req)
 		} else if currentUser.Status == clientStatusCreating {
 			p.pagewriter.WriteErrorPage(w, pagewriter.ErrorPageOpts{
 				Status:   http.StatusAlreadyReported,
@@ -1173,7 +1157,7 @@ func (p *vscodeClientGenerator) ClientCreateCodeSpace(w http.ResponseWriter, req
 				},
 			})
 		} else if currentUser.Status == clientStatusDeleted {
-			codeSpaceCookie()
+			p.codeSpaceCookie(currentUser, w, req)
 
 			http.Redirect(w, req, "/", http.StatusTemporaryRedirect)
 		} else {
