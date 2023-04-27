@@ -49,6 +49,14 @@ else
 	entrypoint_log "$0: No files found in /docker-entrypoint.d/, skipping configuration"
 fi
 
+count=0
+
+while [[ ! -f /var/run/docker-host.sock && $count -lt 5 ]];
+do
+	echo "not found"
+	count=$((count+1))
+done
+
 start-stop-daemon --start --quiet --oknodo --chuid ${USER_ID}:${GROUP_ID} --pidfile /tmp/vscode.pid --exec /usr/local/bin/vscode.sh -- $ARGS
 
 set +e
