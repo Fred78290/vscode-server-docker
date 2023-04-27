@@ -58,7 +58,7 @@ func NewConfig(version string) *Config {
 		Listen:                 "0.0.0.0:8000",
 		VSCodeHostname:         "localhost",
 		VSCodeIngressTlsSecret: "vscode-server-ingress-tls",
-		VSCodeIngressSshSecret: "vscode-server-sshd",
+		VSCodeIngressSshSecret: "vscode-server-ssh",
 		VSCodeTemplatePath:     "/vscode-server-helper/template.yaml",
 		VSCodeServerNameSpace:  "vscode-server",
 		VSCodeAppName:          "vscode-server",

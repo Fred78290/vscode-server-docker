@@ -78,14 +78,22 @@
 			<div class="columns">
 				{{ if ne .ButtonCancel "-" }}
 				<div class="column">
-					<form method="GET" action="{{.Redirect}}">
+					<form method="GET" action="{{.Redirect}}"
+					{{ if .ButtonCancelTarget }}
+						target="{{ .ButtonCancelTarget }}"
+					{{ end }}
+					>
 						<button type="submit" class="button is-danger is-fullwidth">{{.ButtonCancel}}</button>
 					</form>
 				</div>
 				{{ end }}
 
 				<div class="column">
-					<form method="{{.ButtonMethod}}" action="{{.ButtonAction}}">
+					<form method="{{.ButtonMethod}}" action="{{.ButtonAction}}"
+					{{ if .ButtonTarget }}
+						target="{{ .ButtonTarget }}"
+					{{ end }}
+					>
 						<input type="hidden" name="rd" value="{{.Redirect}}">
 						<button type="submit" class="button is-primary is-fullwidth">{{.ButtonText}}</button>
 					</form>

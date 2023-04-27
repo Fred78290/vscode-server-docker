@@ -56,8 +56,12 @@ type ErrorPageOpts struct {
 	ButtonText string
 	// Text for button
 	ButtonCancel string
+	// Target for button
+	ButtonCancelTarget string
 	// Action for button
 	ButtonAction string
+	// Target for button
+	ButtonTarget string
 	// Method for button
 	ButtonMethod string
 	// Generic error messages shown in non-debug mode
@@ -89,31 +93,35 @@ func (e *errorPageWriter) WriteErrorPage(rw http.ResponseWriter, opts ErrorPageO
 	// We allow unescaped template.HTML since it is user configured options
 	/* #nosec G203 */
 	data := struct {
-		Title        string
-		Message      string
-		ProxyPrefix  string
-		StatusCode   int
-		Redirect     string
-		RequestID    string
-		ButtonText   string
-		ButtonCancel string
-		ButtonAction string
-		ButtonMethod string
-		Footer       template.HTML
-		Version      string
+		Title              string
+		Message            string
+		ProxyPrefix        string
+		StatusCode         int
+		Redirect           string
+		RequestID          string
+		ButtonText         string
+		ButtonTarget       string
+		ButtonCancel       string
+		ButtonCancelTarget string
+		ButtonAction       string
+		ButtonMethod       string
+		Footer             template.HTML
+		Version            string
 	}{
-		Title:        opts.AppError, //http.StatusText(opts.Status),
-		Message:      e.getMessage(opts.Status, opts.Messages...),
-		ProxyPrefix:  e.proxyPrefix,
-		StatusCode:   opts.Status,
-		Redirect:     opts.RedirectURL,
-		RequestID:    opts.RequestID,
-		ButtonText:   opts.ButtonText,
-		ButtonCancel: opts.ButtonCancel,
-		ButtonAction: opts.ButtonAction,
-		ButtonMethod: opts.ButtonMethod,
-		Footer:       template.HTML(e.footer),
-		Version:      e.version,
+		Title:              opts.AppError, //http.StatusText(opts.Status),
+		Message:            e.getMessage(opts.Status, opts.Messages...),
+		ProxyPrefix:        e.proxyPrefix,
+		StatusCode:         opts.Status,
+		Redirect:           opts.RedirectURL,
+		RequestID:          opts.RequestID,
+		ButtonText:         opts.ButtonText,
+		ButtonAction:       opts.ButtonAction,
+		ButtonTarget:       opts.ButtonTarget,
+		ButtonCancel:       opts.ButtonCancel,
+		ButtonCancelTarget: opts.ButtonCancelTarget,
+		ButtonMethod:       opts.ButtonMethod,
+		Footer:             template.HTML(e.footer),
+		Version:            e.version,
 	}
 
 	if err := e.template.Execute(rw, data); err != nil {

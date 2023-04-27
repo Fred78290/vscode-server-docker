@@ -32,6 +32,9 @@ fi
 
 : "${VSCODE_SERVER_REGISTRY:?Variable not set or empty}"
 
+export VSCODE_SSH_PRIVATE_KEY=${VSCODE_SSH_PRIVATE_KEY:=~/.ssh/id_rsa}
+export VSCODE_SSH_PUBLIC_KEY=${VSCODE_SSH_PUBLIC_KEY:=~/.ssh/id_rsa.pub}
+
 export VSCODE_ACCOUNT_TYPE=multi
 export VSCODE_SERVER_REGISTRY=${DEV_VSCODE_SERVER_REGISTRY:=${VSCODE_SERVER_REGISTRY}}
 export VSCODE_SERVER_IMAGE=${VSCODE_SERVER_IMAGE:=${VSCODE_SERVER_REGISTRY}/vscode-server:v0.1.0}
@@ -121,7 +124,7 @@ function usage {
 	exit 0
 } 
 
-TEMP=$(getopt -o hvxr --long dry-run,use-cert-manager,use-external-dns,mode:,account-type:,auth-type:,user:,password:,namespace:,hostname:,oauth2-proxy-provider:,oauth2-proxy-client-id:,oauth2-proxy-client-secret:,oauth2-proxy-scope:,vscode-server-cpu-request:,vscode-server-cpu-max:,vscode-server-mem-request:,vscode-server-mem-max:,vscode-server-volume-size:,vscode-server-image:,vscode-server-helper-image:,vscode-server-registry: -n "$0" -- "$@")
+TEMP=$(getopt -o hvxr --long ssh-key:,ssh-pub:,dry-run,use-cert-manager,use-external-dns,mode:,account-type:,auth-type:,user:,password:,namespace:,hostname:,oauth2-proxy-provider:,oauth2-proxy-client-id:,oauth2-proxy-client-secret:,oauth2-proxy-scope:,vscode-server-cpu-request:,vscode-server-cpu-max:,vscode-server-mem-request:,vscode-server-mem-max:,vscode-server-volume-size:,vscode-server-image:,vscode-server-helper-image:,vscode-server-registry: -n "$0" -- "$@")
 
 eval set -- "${TEMP}"
 
@@ -149,6 +152,14 @@ while true; do
 		;;
 	--password)
 		VSCODE_PASSWORD=$2
+		shift 2
+		;;
+	--ssh-key)
+		VSCODE_SSH_PRIVATE_KEY=$2
+		shift 2
+		;;
+	--ssh-pub)
+		VSCODE_SSH_PUBLIC_KEY=$2
 		shift 2
 		;;
 	--namespace)
@@ -338,6 +349,14 @@ if [[ "${VSCODE_AUTH_TYPE}" == oauth2 || "${VSCODE_ACCOUNT_TYPE}" == "multi" ]];
 	cat kubernetes/oauth2-proxy/oauth2-proxy.yaml >> /tmp/deployed.yml
 fi
 
+if [[ -f "${VSCODE_SSH_PRIVATE_KEY}" && -f "${VSCODE_SSH_PUBLIC_KEY}" ]]; then
+	echo "---" >> /tmp/deployed.yml
+	kubectl create secret generic vscode-server-ssh -n ${VSCODE_NAMESPACE} \
+		--from-file=id_rsa="${VSCODE_SSH_PRIVATE_KEY}" \
+		--from-file=id_rsa.pub="${VSCODE_SSH_PUBLIC_KEY}" \
+		--dry-run=client -o yaml >> /tmp/deployed.yml
+fi
+
 if [[ -n "${VSCODE_TLS_KEY}" && -n "${VSCODE_TLS_CERT}" ]]; then
 	echo "---" >> /tmp/deployed.yml
 	kubectl create secret tls vscode-server-ingress-tls -n ${VSCODE_NAMESPACE} \
@@ -379,7 +398,9 @@ if [ "${VSCODE_ACCOUNT_TYPE}" == "multi" ]; then
 		--dry-run=client -o yaml >> /tmp/deployed.yml
 
 	echo "---" >> /tmp/deployed.yml
-	kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} --from-file=kubernetes/multi-account/template.yaml --dry-run=client -o yaml >> /tmp/deployed.yml
+	kubectl create configmap vscode-server-template -n ${VSCODE_NAMESPACE} \
+		--from-file=kubernetes/multi-account/template.yaml \
+		--dry-run=client -o yaml >> /tmp/deployed.yml
 fi
 
 sed ${FILTER} /tmp/deployed.yml | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
