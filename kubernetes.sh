@@ -403,4 +403,4 @@ if [ "${VSCODE_ACCOUNT_TYPE}" == "multi" ]; then
 		--dry-run=client -o yaml >> /tmp/deployed.yml
 fi
 
-sed ${FILTER} /tmp/deployed.yml | envsubst "$DEFINED_ENVS" | tee kubernetes/multi-account/deployed.yml | kubectl apply ${DRY_RUN} -f -
+sed ${FILTER} /tmp/deployed.yml | envsubst "$DEFINED_ENVS" | tee $(dirname $MAIN_TEMPLATE)/deployed.yml | kubectl apply ${DRY_RUN} -f -
