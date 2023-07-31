@@ -19,15 +19,17 @@ export OSDISTRO=$(uname -s)
 if [ "${OSDISTRO}" = "Linux" ]; then
 	NET_IF=$(ip route get 1 | awk '{print $5;exit}')
 	EXTERNAL_IP=$(ip addr show ${NET_IF} | grep -m 1 "inet\s" | tr '/' ' ' | awk '{print $2}')
+	SSL_DIR=${HOME}/etc/ssl/${DOMAIN_NAME}/
 else
 	NET_IF=$(route get 1 | grep -m 1 interface | awk '{print $2}')
 	EXTERNAL_IP=$(ifconfig ${NET_IF} | grep -m 1 "inet\s" | sed -n 1p | awk '{print $2}')
+	SSL_DIR=${HOME}/Library/etc/ssl/${DOMAIN_NAME}/
 fi
 
-if [ ! -f ${CURDIR}/ssl/privkey.pem ]; then
+if [ ! -f ${SSL_DIR}/privkey.pem ]; then
 	openssl req -nodes -x509 -sha256 -newkey rsa:4096 \
-	-keyout ${CURDIR}/ssl/privkey.pem \
-	-out ${CURDIR}/ssl/cert.pem \
+	-keyout ${SSL_DIR}/privkey.pem \
+	-out ${SSL_DIR}/cert.pem \
 	-days 3560 \
 	-subj "/C=US/ST=California/L=San Francisco/O=GitHub/OU=Fred78290/CN=localhost" \
 	-extensions san \
@@ -78,6 +80,6 @@ docker run -d --restart always \
 	-e OAUTH2_PROXY=oauth2-proxy.${DOMAIN_NAME} \
 	-e LISTEN_PORT=${LISTEN_PORT} \
 	-p ${LISTEN_PORT}:${LISTEN_PORT} \
-	-v ${PWD}/ssl:/etc/nginx/ssl \
+	-v ${SSL_DIR}:/etc/nginx/ssl \
 	-v ${PWD}/etc/template.d:/etc/nginx/templates/ \
 	nginx
