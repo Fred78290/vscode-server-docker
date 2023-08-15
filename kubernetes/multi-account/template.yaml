@@ -115,7 +115,7 @@ spec:
             - mountPath: /home/codespace/.vscode-remote
               name: vscode-server-volume
               subPath: vscode-server-remote
-            - mountPath: /workspace
+            - mountPath: /workspaces
               name: vscode-server-volume
               subPath: vscode-server-home
             - mountPath: /certs

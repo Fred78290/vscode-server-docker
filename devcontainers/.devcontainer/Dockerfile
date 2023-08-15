@@ -22,11 +22,9 @@ ENV GROUP_ID=1000
 ADD docker-entrypoint.d /docker-entrypoint.d
 ADD docker-entrypoint.sh /docker-entrypoint.sh
 
-VOLUME /workspaces
+VOLUME [ "/var/lib/docker", "/workspaces" ]
 
 EXPOSE 8000 2222
-
-VOLUME /workspaces
 
 # Fire Docker/Moby script if needed
 ENTRYPOINT ["/usr/bin/tini", "--" ]

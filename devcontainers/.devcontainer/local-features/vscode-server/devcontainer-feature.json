@@ -2,7 +2,8 @@
     "id": "setup-vscode-server",
     "name": "Install vscode-server",
     "containerEnv": {
-        "VSCODE_SERVER_DATA_DIR": "/home/codespace/.vscode-remote"
+        "VSCODE_SERVER_DATA_DIR": "/home/codespace/.vscode-remote",
+		"VSCODE_SERVER_DISTRO": "insider"
     },
     "capAdd": [
         "IPC_LOCK"

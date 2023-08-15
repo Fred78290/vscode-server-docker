@@ -1,0 +1,8 @@
+{
+    "id": "uninstall-docker-in-docker",
+    "name": "Remove docker in docker",
+    "install": {
+        "app": "",
+        "file": "install.sh"
+    }
+}

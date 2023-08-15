@@ -1088,7 +1088,7 @@ func (p *vscodeClientGenerator) codeSpaceCreated(currentUser *vscodeClient, w ht
 		redirect = &url.URL{
 			Host:   requestutil.GetRequestHost(req),
 			Scheme: requestutil.GetRequestProto(req),
-			Path:   fmt.Sprintf("/%s?folder=/workspace", currentUser.Name),
+			Path:   fmt.Sprintf("/%s?folder=/workspaces", currentUser.Name),
 		}
 	}
 

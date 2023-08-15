@@ -1,5 +1,7 @@
 #!/bin/bash
 
+USERNAME="${USERNAME:-"${_REMOTE_USER:-"automatic"}"}"
+
 dpkgArch="$(dpkg --print-architecture)"
 
 case "${dpkgArch##*-}" in
@@ -28,16 +30,21 @@ curl -fsSL https://code-server.dev/install.sh | sh
 cat <<'EOF' > /usr/local/bin/vscode.sh
 #!/bin/bash
 
+ls -l /
+
 set -o pipefail -o nounset
 
 : "${VSCODE_KEYRING_PASS:?Variable not set or empty}"
 
-ARGS="--bind-addr 0.0.0.0:8000 --auth none --user-data-dir=/workspace --extensions-dir=$HOME/.vscode-remote"
+ARGS="--bind-addr 0.0.0.0:8000 --auth none --user-data-dir=/workspaces --extensions-dir=$HOME/.vscode-remote"
 
 exec dbus-run-session -- sh -c "(echo $VSCODE_KEYRING_PASS | gnome-keyring-daemon --unlock) && code-server ${ARGS}"
 
 EOF
 
+mkdir /workspaces
+
+chown ${USERNAME}:${USERNAME} /workspaces
 chmod +x /usr/local/bin/vscode.sh
 
 apt autoclean
