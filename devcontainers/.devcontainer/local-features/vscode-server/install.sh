@@ -21,9 +21,16 @@ esac
 
 apt update
 apt dist-upgrade -y
-apt install nano sudo python3 jq gettext-base wget curl git build-essential openssh-client iproute2 libsecret-1-0 dbus-user-session gnome-keyring ca-certificates zlib1g -y --no-install-recommends
+apt install tini nano sudo python3 jq gettext-base wget curl git build-essential openssh-client iproute2 libsecret-1-0 dbus-user-session gnome-keyring ca-certificates zlib1g -y --no-install-recommends
 
-curl -sL https://aka.ms/install-vscode-server/setup.sh | sh
+# https://github.com/microsoft/vscode/issues/135856#issuecomment-1170091265
+LATEST="$(curl -fsSL https://update.code.visualstudio.com/api/commits/stable/server-linux-x64-web | jq -r 'first')"
+wget https://az764295.vo.msecnd.net/stable/${LATEST}/vscode-server-linux-x64-web.tar.gz -O /tmp/vscode-server-linux-${LATEST}-x64-web.tar.gz
+sudo mkdir -p /opt/vscode/${LATEST}
+sudo tar --strip-components=1 -xf /tmp/vscode-server-linux-${LATEST}-x64-web.tar.gz -C /opt/vscode/${LATEST}
+CODEVER="$(cat /opt/vscode/${LATEST}/package.json | jq -r '.version')"
+sudo ln -sfn ${LATEST} /opt/vscode/${CODEVER}
+sudo ln -sfn ${CODEVER} /opt/vscode/latest
 
 cat <<'EOF' > /usr/local/bin/vscode.sh
 #!/bin/bash
@@ -33,16 +40,13 @@ set -o pipefail -o nounset
 : "${VSCODE_KEYRING_PASS:?Variable not set or empty}"
 
 export VSCODE_SERVER_DATA_DIR="${VSCODE_SERVER_DATA_DIR:=$HOME/.vscode-remote}"
+export PATH=/opt/vscode/latest/bin:$PATH
 
 ARGS="$@"
 
-echo $ARGS
-
 if [ -z "$ARGS" ]; then
-	ARGS="serve-local --accept-server-license-terms --without-connection-token --host 0.0.0.0"
+	ARGS="serve-local --accept-server-license-terms --without-connection-token --host 0.0.0.0 --log debug"
 fi
-
-code-server --accept-server-license-terms update
 
 exec dbus-run-session -- sh -c "(echo $VSCODE_KEYRING_PASS | gnome-keyring-daemon --unlock) && code-server ${ARGS}"
 

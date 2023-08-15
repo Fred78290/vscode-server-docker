@@ -1,0 +1,11 @@
+{
+    "id": "setup-code-server",
+    "name": "Install code-server",
+    "capAdd": [
+        "IPC_LOCK"
+    ],
+    "install": {
+        "app": "",
+        "file": "install.sh"
+    }
+}
