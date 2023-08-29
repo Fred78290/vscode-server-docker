@@ -28,7 +28,7 @@ spec:
   ports:
     - appProtocol: http
       name: http
-      port: 8000
+      port: ${VSCODE_SERVER_PORT}
       targetPort: http
   selector:
     app.kubernetes.io/name: vscode-server
@@ -92,18 +92,18 @@ spec:
               add:
                 - IPC_LOCK
           ports:
-            - containerPort: 8000
+            - containerPort: ${VSCODE_SERVER_PORT}
               name: http
           livenessProbe:
             tcpSocket:
-              port: 8000
+              port: ${VSCODE_SERVER_PORT}
             initialDelaySeconds: 60
             failureThreshold: 5
             periodSeconds: 10
             timeoutSeconds: 5
           readinessProbe:
             tcpSocket:
-              port: 8000
+              port: ${VSCODE_SERVER_PORT}
             initialDelaySeconds: 5
             failureThreshold: 5
             periodSeconds: 10
@@ -243,7 +243,7 @@ spec:
               service:
                 name: vscode-server
                 port:
-                  number: 8000
+                  number: ${VSCODE_SERVER_PORT}
 ---
 ${ACCOUNT_CONFIGMAP}
 ---

@@ -1,12 +1,12 @@
 #!/bin/bash
 # vim:sw=4:ts=4:et
 
+ARGS=$0
+
 set -e
 set -o pipefail -o nounset
 
 : "${VSCODE_KEYRING_PASS:?Variable not set or empty}"
-
-ARGS="serve-local --accept-server-license-terms --without-connection-token --host 0.0.0.0 --log debug"
 
 source /lib/lsb/init-functions
 

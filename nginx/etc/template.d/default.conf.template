@@ -1,3 +1,17 @@
+upstream vscode-backend {
+  # enable sticky session based on IP
+  ip_hash;
+
+  server $EXTERNAL_IP:8000;
+}
+
+upstream oauth-backend {
+  # enable sticky session based on IP
+  ip_hash;
+
+  server $OAUTH2_PROXY:4180;
+}
+
 server {
 	listen $LISTEN_PORT ssl http2;
 	server_name $VSCODE_SERVER_NAME;
@@ -11,13 +25,14 @@ server {
 	}
 
 	location / {
-		proxy_pass http://$EXTERNAL_IP:8000;
+		proxy_pass http://vscode-backend;
 		proxy_set_header Host $host;
 		#proxy_redirect off;
 		#proxy_http_version 1.1;
 
 		client_body_timeout 600s;
 
+	    proxy_http_version 1.1;
 		proxy_set_header Upgrade $http_upgrade;
 		proxy_set_header Connection "upgrade";
 		proxy_set_header X-Real-IP $remote_addr;
@@ -35,7 +50,9 @@ server {
 	}
 
 	location /oauth2/ {
-		proxy_pass http://$OAUTH2_PROXY:4180;
+		proxy_pass http://oauth-backend;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
 		proxy_set_header Host $host;
 		proxy_set_header X-Real-IP $remote_addr;
 		proxy_set_header X-Scheme $scheme;
@@ -43,7 +60,9 @@ server {
 	}
 
 	location /oauth2/auth {
-		proxy_pass http://$OAUTH2_PROXY:4180;
+		proxy_pass http://oauth-backend;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
 		proxy_set_header Host $host;
 		proxy_set_header X-Real-IP $remote_addr;
 		proxy_set_header X-Scheme $scheme;

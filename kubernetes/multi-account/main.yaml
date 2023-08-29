@@ -139,9 +139,9 @@ metadata:
 spec:
   ports:
     - name: http
-      port: 8000
+      port: ${VSCODE_HELPER_PORT}
       protocol: TCP
-      targetPort: 8000
+      targetPort: ${VSCODE_HELPER_PORT}
   selector:
     app.kubernetes.io/name: vscode-server-helper
 ---
@@ -187,7 +187,7 @@ spec:
               service:
                 name: vscode-server-helper
                 port:
-                  number: 8000
+                  number: ${VSCODE_HELPER_PORT}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -211,26 +211,26 @@ spec:
       http:
         paths:
           - path: /robots.txt
-            pathType: Prefix
+            pathType: Exact
             backend:
               service:
                 name: vscode-server-helper
                 port:
-                  number: 8000
+                  number: ${VSCODE_HELPER_PORT}
           - path: /echo
-            pathType: Prefix
+            pathType: Exact
             backend:
               service:
                 name: vscode-server-helper
                 port:
-                  number: 8000
+                  number: ${VSCODE_HELPER_PORT}
           - path: /logout
-            pathType: Prefix
+            pathType: Exact
             backend:
               service:
                 name: vscode-server-helper
                 port:
-                  number: 8000
+                  number: ${VSCODE_HELPER_PORT}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -255,7 +255,7 @@ spec:
             - --prefix=/create-space
             - --vscode-namespace=${VSCODE_NAMESPACE}
             - --vscode-template-file=/usr/share/vscode-server-helper/template.yaml
-            - --http-address=0.0.0.0:8000
+            - --http-address=0.0.0.0:${VSCODE_HELPER_PORT}
           resources:
             limits:
               cpu: 200m
@@ -267,7 +267,7 @@ spec:
           imagePullPolicy: Always
           name: vscode-server-helper
           ports:
-            - containerPort: 8000
+            - containerPort: ${VSCODE_HELPER_PORT}
               protocol: TCP
           envFrom:
             - configMapRef:

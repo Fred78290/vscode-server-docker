@@ -8,12 +8,12 @@
         "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
             "version": "latest"
         },
-        "./local-features/vscode-server": "latest"
+        "./local-features/vscode-insiders": "latest"
     },
 	"overrideFeatureInstallOrder": [
 		"./local-features/uninstall-docker-in-docker",
 		"ghcr.io/devcontainers/features/docker-outside-of-docker",
-		"./local-features/vscode-server"
+		"./local-features/vscode-insiders"
 	],
     "remoteUser": "codespace",
     "containerUser": "codespace",

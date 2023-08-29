@@ -17,7 +17,7 @@ spec:
   ports:
     - appProtocol: http
       name: http
-      port: 8000
+      port: ${VSCODE_SERVER_PORT}
       targetPort: http
   selector:
     app.kubernetes.io/name: vscode-server
@@ -65,7 +65,7 @@ spec:
           image: ${VSCODE_SERVER_IMAGE}
           imagePullPolicy: Always
           ports:
-            - containerPort: 8000
+            - containerPort: ${VSCODE_SERVER_PORT}
               name: http
           volumeMounts:
             - mountPath: /home/vscode
@@ -142,4 +142,4 @@ spec:
               service:
                 name: vscode-server
                 port:
-                  number: 8000
+                  number: ${VSCODE_SERVER_PORT}

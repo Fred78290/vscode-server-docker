@@ -39,7 +39,7 @@ spec:
               service:
                 name: vscode-server-helper
                 port:
-                  number: 8000
+                  number: ${VSCODE_HELPER_PORT}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -63,26 +63,26 @@ spec:
       http:
         paths:
           - path: /robots.txt
-            pathType: Prefix
+            pathType: Exact
             backend:
               service:
                 name: vscode-server-helper
                 port:
-                  number: 8000
+                  number: ${VSCODE_HELPER_PORT}
           - path: /echo
-            pathType: Prefix
+            pathType: Exact
             backend:
               service:
                 name: vscode-server-helper
                 port:
-                  number: 8000
+                  number: ${VSCODE_HELPER_PORT}
           - path: /logout
-            pathType: Prefix
+            pathType: Exact
             backend:
               service:
                 name: vscode-server-helper
                 port:
-                  number: 8000
+                  number: ${VSCODE_HELPER_PORT}
 ---
 apiVersion: v1
 kind: Service
@@ -94,8 +94,8 @@ metadata:
 spec:
   ports:
     - protocol: TCP
-      port: 8000
-      targetPort: 8000
+      port: ${VSCODE_HELPER_PORT}
+      targetPort: ${VSCODE_HELPER_PORT}
       name: vscode-server-helper
 ---
 apiVersion: discovery.k8s.io/v1
@@ -111,7 +111,7 @@ ports:
   - name: vscode-server-helper
     appProtocol: http
     protocol: TCP
-    port: 8000
+    port: ${VSCODE_HELPER_PORT}
 endpoints:
   - addresses:
       - "${EXTERNAL_IP}" # the IP addresses in this list can appear in any order
@@ -125,5 +125,5 @@ subsets:
   - addresses:
       - ip: "${EXTERNAL_IP}"
     ports:
-      - port: 8000
+      - port: ${VSCODE_HELPER_PORT}
         name: vscode-server-helper

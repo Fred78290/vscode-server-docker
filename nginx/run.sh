@@ -6,6 +6,7 @@ pushd ${CURDIR}
 
 CURDIR=$PWD
 LISTEN_PORT=1443
+VSCODE_HOSTNAME=${VSCODE_HOSTNAME:=vscode-server.acme.com}
 DOMAIN_NAME=${VSCODE_HOSTNAME#*.}
 VSCODE_SERVER_NAME=localhost.${DOMAIN_NAME}
 VSCODE_OAUTH2_PROXY_PROVIDER=${VSCODE_OAUTH2_PROXY_PROVIDER:=${GITHUB_OAUTH2_PROXY_PROVIDER}}
@@ -62,13 +63,12 @@ docker run -d --restart always \
 		--client-secret=${VSCODE_OAUTH2_PROXY_CLIENT_SECRET} \
 		--scope="${VSCODE_OAUTH2_PROXY_SCOPE}" \
 		--cookie-secret=9t7ZhuK0qj1-FiEQr5K4Q8hJSLYfuK7_2NAVDIhXmVc= \
-		--redirect-url=https://${VSCODE_SERVER_NAME}:1443/oauth2/callback \
+		--redirect-url=https://${VSCODE_SERVER_NAME}:${LISTEN_PORT}/oauth2/callback \
 		--cookie-domain=${DOMAIN_NAME} \
 		--whitelist-domain=*.${DOMAIN_NAME} \
 		--email-domain=* \
 		--upstream=file:///dev/null \
 		--http-address=0.0.0.0:4180
-
 
 docker rm -f vscode-server-helper-wrapper
 docker run -d --restart always \

@@ -1,6 +1,53 @@
 #!/bin/bash
 set -o pipefail -o nounset
 
+function echo_blue_dot() {
+	>&2 echo -n -e "\x1B[90m\x1B[39m\x1B[1m\x1B[34m.\x1B[0m\x1B[39m"
+}
+
+function echo_blue_dot_title() {
+	# echo message in blue and bold
+	>&2 echo -n -e "\x1B[90m= $(date '+%Y-%m-%d %T') \x1B[39m\x1B[1m\x1B[34m$1\x1B[0m\x1B[39m"
+}
+
+function echo_blue_bold() {
+	# echo message in blue and bold
+	>&2 echo -e "\x1B[90m= $(date '+%Y-%m-%d %T') \x1B[39m\x1B[1m\x1B[34m$1\x1B[0m\x1B[39m"
+}
+
+function echo_title() {
+	# echo message in blue and bold
+	echo
+	echo_line
+	echo_blue_bold "$1"
+	echo_line
+}
+
+function echo_grey() {
+	# echo message in light grey
+	>&2 echo -e "\x1B[90m$1\x1B[39m"
+}
+
+function echo_red() {
+	# echo message in red
+	>&2 echo -e "\x1B[31m$1\x1B[39m"
+}
+
+function echo_red_bold() {
+	# echo message in blue and bold
+	>&2 echo -e "\x1B[90m= $(date '+%Y-%m-%d %T') \x1B[31m\x1B[1m\x1B[31m$1\x1B[0m\x1B[39m"
+}
+
+function echo_separator() {
+	echo_line
+	>&2 echo
+	>&2 echo
+}
+
+function echo_line() {
+	echo_grey "============================================================================================================================="
+}
+
 if [ "$(uname -s)" == "Darwin" ]; then
     if [ -z "$(command -v gsed)" ]; then
         echo_red_bold "You must install gnu sed with brew (brew install gsed), this script is not compatible with the native macos sed"
@@ -22,12 +69,6 @@ if [ "$(uname -s)" == "Darwin" ]; then
     alias base64=gbase64
     alias sed=gsed
     alias getopt=/usr/local/opt/gnu-getopt/bin/getopt
-
-	export NET_IF=$(route get 1 | grep -m 1 interface | awk '{print $2}')
-	export EXTERNAL_IP=$(ifconfig ${NET_IF} | grep -m 1 "inet\s" | sed -n 1p | awk '{print $2}')
-else
-	export NET_IF=$(ip route get 1 | awk '{print $5;exit}')
-	export EXTERNAL_IP=$(ip addr show ${NET_IF} | grep -m 1 "inet\s" | tr '/' ' ' | awk '{print $2}')
 fi
 
 : "${VSCODE_SERVER_REGISTRY:?Variable not set or empty}"
@@ -36,6 +77,8 @@ export VSCODE_SSH_PRIVATE_KEY=${VSCODE_SSH_PRIVATE_KEY:=~/.ssh/id_rsa}
 export VSCODE_SSH_PUBLIC_KEY=${VSCODE_SSH_PUBLIC_KEY:=~/.ssh/id_rsa.pub}
 
 export VSCODE_ACCOUNT_TYPE=multi
+export VSCODE_HELPER_PORT=${VSCODE_HELPER_PORT:=8000}
+export VSCODE_SERVER_PORT=${VSCODE_SERVER_PORT:=8000}
 export VSCODE_SERVER_REGISTRY=${DEV_VSCODE_SERVER_REGISTRY:=${VSCODE_SERVER_REGISTRY}}
 export VSCODE_SERVER_IMAGE=${VSCODE_SERVER_IMAGE:=${VSCODE_SERVER_REGISTRY}/vscode-server:v0.1.0}
 export VSCODE_SERVER_HELPER_IMAGE=${VSCODE_SERVER_HELPER_IMAGE:=${VSCODE_SERVER_REGISTRY}/vscode-server-helper:v0.1.0}
@@ -69,10 +112,10 @@ export DIND_MEM_MAX=4G
 export VSCODE_ENVSUBST_FILTER="${VSCODE_ENVSUBST_FILTER:-}"
 export VSCODE_INGRESS_AUTH_URL='https://$host/oauth2/auth'
 export VSCODE_INGRESS_AUTH_SIGNIN='https://$host/oauth2/start?rd=$escaped_request_uri'
-export VSCODE_CERT_CLUSTER_ISSUER='letsencrypt-prod'
+export VSCODE_CERT_CLUSTER_ISSUER=$(kubectl get clusterissuers -o json | jq -r '.items[0].metadata.name // ""')
 export VSCODE_MODE=dev
-export VSCODE_TLS_KEY=nginx/ssl/privkey.pem
-export VSCODE_TLS_CERT=nginx/ssl/cert.pem
+export VSCODE_TLS_KEY=
+export VSCODE_TLS_CERT=
 
 export DEFAULT_NGINX_INGRESS_CLASS=$(kubectl get ingressclass -o json | jq -r '.items[]|select(.metadata.annotations."ingressclass.kubernetes.io/is-default-class" == "true")|.metadata.name')
 export DEFAULT_STORAGE_CLASS=$(kubectl get storageclass -o json | jq -r '.items[]|select(.metadata.annotations."storageclass.kubernetes.io/is-default-class" == "true")|.metadata.name')
@@ -81,6 +124,7 @@ export DRY_RUN=${DRY_RUN:-}
 export USE_CERT_MANANGER=NO
 export USE_EXTERNAL_DNS=NO
 
+: VSCODE_CERT_CLUSTER_ISSUER=${VSCODE_CERT_CLUSTER_ISSUER:=?Any cert cluster issuer found}
 : NGINX_INGRESS_CLASS=${NGINX_INGRESS_CLASS:=${DEFAULT_NGINX_INGRESS_CLASS:?Any ingress class defined}}
 : STORAGE_CLASS=${STORAGE_CLASS:=${DEFAULT_STORAGE_CLASS:?Any storage class defined}}
 
@@ -124,7 +168,7 @@ function usage {
 	exit 0
 } 
 
-TEMP=$(getopt -o hvxr --long ssh-key:,ssh-pub:,dry-run,use-cert-manager,use-external-dns,mode:,account-type:,auth-type:,user:,password:,namespace:,hostname:,oauth2-proxy-provider:,oauth2-proxy-client-id:,oauth2-proxy-client-secret:,oauth2-proxy-scope:,vscode-server-cpu-request:,vscode-server-cpu-max:,vscode-server-mem-request:,vscode-server-mem-max:,vscode-server-volume-size:,vscode-server-image:,vscode-server-helper-image:,vscode-server-registry: -n "$0" -- "$@")
+TEMP=$(getopt -o hvxr --long ssh-key:,ssh-pub:,dry-run,use-cert-manager,use-external-dns,mode-dev,account-type:,auth-type:,user:,password:,namespace:,hostname:,oauth2-proxy-provider:,oauth2-proxy-client-id:,oauth2-proxy-client-secret:,oauth2-proxy-scope:,vscode-server-cpu-request:,vscode-server-cpu-max:,vscode-server-mem-request:,vscode-server-mem-max:,vscode-server-volume-size:,vscode-server-image:,vscode-server-helper-image:,vscode-server-registry: -n "$0" -- "$@")
 
 eval set -- "${TEMP}"
 
@@ -134,9 +178,9 @@ while true; do
         usage
         exit 0
         ;;
-	--mode)
-		VSCODE_MODE=$2
-		shift 2
+	--mode-dev)
+		VSCODE_MODE=dev
+		shift 1
 		;;
 	--account-type)
 		VSCODE_ACCOUNT_TYPE=$2
@@ -264,6 +308,40 @@ while true; do
     esac
 done
 
+export DOMAIN_NAME=${VSCODE_HOSTNAME#*.}
+
+if [ "$(uname -s)" == "Darwin" ]; then
+	export NET_IF=$(route get 1 | grep -m 1 interface | awk '{print $2}')
+	export EXTERNAL_IP=$(ifconfig ${NET_IF} | grep -m 1 "inet\s" | sed -n 1p | awk '{print $2}')
+	export SSL_DIR=${HOME}/Library/etc/ssl/${DOMAIN_NAME}/
+else
+	export NET_IF=$(ip route get 1 | awk '{print $5;exit}')
+	export EXTERNAL_IP=$(ip addr show ${NET_IF} | grep -m 1 "inet\s" | tr '/' ' ' | awk '{print $2}')
+	export SSL_DIR=${HOME}/etc/ssl/${DOMAIN_NAME}/
+fi
+
+if [ -z "${VSCODE_TLS_CERT}" ] || [ -z "${VSCODE_TLS_CERT}" ]; then
+	export VSCODE_TLS_KEY=${SSL_DIR}/privkey.pem
+	export VSCODE_TLS_CERT=${SSL_DIR}/cert.pem
+
+	if [ ! -f ${VSCODE_TLS_KEY} ]; then
+		openssl req -nodes -x509 -sha256 -newkey rsa:4096 \
+		-keyout ${VSCODE_TLS_KEY} \
+		-out ${VSCODE_TLS_CERT} \
+		-days 3560 \
+		-subj "/C=US/ST=California/L=San Francisco/O=GitHub/OU=Fred78290/CN=${VSCODE_HOSTNAME}" \
+		-extensions san \
+		-config <( \
+		echo '[req]'; \
+		echo 'distinguished_name=req'; \
+		echo '[san]'; \
+		echo "subjectAltName=DNS:localhost,DNS:*.${DOMAIN_NAME}")
+	fi
+elif [ ! -f ${VSCODE_TLS_CERT} ] || [ ! -f ${VSCODE_TLS_CERT} ]; then
+	echo_red_bold "cert: ${VSCODE_TLS_CERT} or ${VSCODE_TLS_CERT} not found"
+	exit -1
+fi
+
 VSCODE_SERVER_REDIRECT=$(url_encode "https://${VSCODE_HOSTNAME}/create-space")
 
 : "${VSCODE_MODE:?Variable not set or empty}"
@@ -290,13 +368,7 @@ VSCODE_SERVER_REDIRECT=$(url_encode "https://${VSCODE_HOSTNAME}/create-space")
 if [ ${USE_CERT_MANANGER} = "YES" ]; then
 	: "${VSCODE_CERT_CLUSTER_ISSUER:?Variable not set or empty}"
 else
-	FILTER="-e /VSCODE_CERT_CLUSTER_ISSUER/d"
-fi
-
-if [ ${USE_CERT_MANANGER} = "YES" ]; then
-	: "${VSCODE_CERT_CLUSTER_ISSUER:?Variable not set or empty}"
-elif [ ${USE_CERT_MANANGER} != "YES" ]; then
-	FILTER="${FILTER} -e /external-dns/d"
+	FILTER="-e /VSCODE_CERT_CLUSTER_ISSUER/d -e /external-dns/d"
 fi
 
 if [ -z "${VSCODE_TLS_KEY}" ] && [ -z "${VSCODE_TLS_CERT}" ]; then
